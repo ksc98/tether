@@ -1,0 +1,63 @@
+name: iOS sideload build
+
+# Builds the iOS app with real Xcode so the bundle carries Metadata.appintents,
+# which Shortcuts needs to list the app's actions. The IPA is ad-hoc signed with
+# its entitlements embedded; `xtool install` re-signs it for a device.
+
+on:
+  push:
+    branches: [kyle]
+    paths:
+      - "apple/**"
+      - ".github/workflows/ios-sideload.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode 26
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcode=$(ls -d /Applications/Xcode_26*.app | grep -v -i beta | sort -V | tail -n1)
+          sudo xcode-select -s "$xcode"
+          xcodebuild -version
+
+      - name: Build
+        working-directory: apple
+        run: |
+          xcodebuild -list -project Tether.xcodeproj
+          xcodebuild build \
+            -project Tether.xcodeproj \
+            -scheme Tether \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Embed entitlements and package
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/Tether.app"
+          test -d "$app/Metadata.appintents"
+          plutil -p "$app/Metadata.appintents/extract.actionsdata" | grep -E 'Intent"' | sort -u
+
+          # xtool reads each bundle's entitlements from its existing signature.
+          appex=$(find "$app/PlugIns" -maxdepth 1 -name '*.appex')
+          codesign --force --sign - \
+            --entitlements apple/TetherShareExtension/TetherShareExtension.entitlements "$appex"
+          codesign --force --sign - --entitlements apple/Tether/Tether.entitlements "$app"
+          codesign -d --entitlements - "$app"
+
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$app" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$RUNNER_TEMP/Tether.ipa" Payload)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tether-ipa
+          path: ${{ runner.temp }}/Tether.ipa
+          if-no-files-found: error
