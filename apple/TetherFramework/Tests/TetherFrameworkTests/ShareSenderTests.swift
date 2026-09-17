@@ -11,7 +11,7 @@ struct ShareSenderTests {
     // The main app reconnects to this endpoint when discovery finds nothing, so a
     // persisted host must come back as the same host and port.
     @Test func lastEndpointRoundTrips() {
-        let defaults = UserDefaults(suiteName: CertificateManager.appGroupID) ?? .standard
+        let defaults = CertificateManager.sharedDefaults
         let savedHost = defaults.string(forKey: "TetherLastHost")
         let savedPort = defaults.object(forKey: "TetherLastPort")
         defer {
