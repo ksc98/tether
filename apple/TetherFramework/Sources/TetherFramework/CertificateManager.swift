@@ -26,7 +26,17 @@ import UIKit
 @Observable
 public final class CertificateManager {
     // Shared App Group identifier — must match both targets' entitlements.
-    public static let appGroupID = "group.net.jeedup.Tether"
+    //
+    // xtool re-signs a sideloaded build with the bundle id and the app group both
+    // prefixed "XTL-<id>.", so the group follows the prefix of the running bundle.
+    public static let appGroupID: String = {
+        let base = "net.jeedup.Tether"
+        if let prefix = Bundle.main.bundleIdentifier?.split(separator: ".").first,
+           prefix.hasPrefix("XTL-") {
+            return "group.\(prefix).\(base)"
+        }
+        return "group.\(base)"
+    }()
 
     // The Keychain access group entitlement uses $(AppIdentifierPrefix), which
     // the OS expands to your Team ID at runtime (e.g. "ABCDE12345.net.jeedup.Tether").
