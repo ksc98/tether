@@ -42,6 +42,22 @@ public enum ShareSenderError: LocalizedError {
     }
 }
 
+/// Guards a continuation that a reply, a connection failure and a timeout all
+/// race to resume, from different threads.
+private final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    /// True for exactly one caller.
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
 /// Async helper used by the Share Extension to send a payload to tetherd.
 ///
 /// Usage:
@@ -61,6 +77,9 @@ public actor ShareSender {
 
     // Maximum seconds to wait for the connection to become ready.
     private static let connectionTimeoutSeconds: Double = 8
+
+    // Maximum seconds to wait for the daemon's clipboard_content reply.
+    private static let clipboardReplyTimeoutSeconds: Double = 5
 
     /// Send a `SharePayload` to the paired tetherd daemon.
     ///
@@ -132,6 +151,67 @@ public actor ShareSender {
 
         connection.disconnect()
         return results
+    }
+
+    /// Fetch the desktop's current clipboard text from the paired tetherd daemon.
+    ///
+    /// Used by the Shortcuts intent, which runs with the app in the background
+    /// where no live connection exists.
+    public static func fetchClipboard() async -> Result<String, Error> {
+        let connection: TetherConnection
+        switch await connectToLastKnownHost() {
+        case .success(let conn):
+            connection = conn
+        case .failure(let error):
+            return .failure(error)
+        }
+
+        let result: Result<String, Error> = await withCheckedContinuation { continuation in
+            let once = ResumeOnce()
+
+            connection.onMessage = { message in
+                switch message.parsedCommand {
+                case .clipboardContent:
+                    if once.claim() {
+                        continuation.resume(returning: .success(message.content ?? ""))
+                    }
+                case .error:
+                    if once.claim() {
+                        let msg = message.message ?? "Unknown error from daemon"
+                        continuation.resume(returning: .failure(ShareSenderError.connectionFailed(msg)))
+                    }
+                default:
+                    // The daemon also broadcasts clipboard_updated to every client.
+                    break
+                }
+            }
+
+            connection.onStateChange = { state in
+                let reason: String
+                switch state {
+                case .failed(let msg): reason = msg
+                case .disconnected: reason = "The desktop closed the connection."
+                default: return
+                }
+                if once.claim() {
+                    continuation.resume(returning: .failure(ShareSenderError.connectionFailed(reason)))
+                }
+            }
+
+            connection.send(.clipboardGet())
+
+            Task {
+                try? await Task.sleep(for: .seconds(clipboardReplyTimeoutSeconds))
+                if once.claim() {
+                    continuation.resume(returning: .failure(ShareSenderError.timeout))
+                }
+            }
+        }
+
+        connection.onMessage = nil
+        connection.onStateChange = nil
+        connection.disconnect()
+        return result
     }
 
     // MARK: - Private — Connection
