@@ -26,17 +26,7 @@ import UIKit
 @Observable
 public final class CertificateManager {
     // Shared App Group identifier — must match both targets' entitlements.
-    //
-    // xtool re-signs a sideloaded build with the bundle id and the app group both
-    // prefixed "XTL-<id>.", so the group follows the prefix of the running bundle.
-    public static let appGroupID: String = {
-        let base = "net.jeedup.Tether"
-        if let prefix = Bundle.main.bundleIdentifier?.split(separator: ".").first,
-           prefix.hasPrefix("XTL-") {
-            return "group.\(prefix).\(base)"
-        }
-        return "group.\(base)"
-    }()
+    public static let appGroupID = "group.net.jeedup.Tether"
 
     // The Keychain access group entitlement uses $(AppIdentifierPrefix), which
     // the OS expands to your Team ID at runtime (e.g. "ABCDE12345.net.jeedup.Tether").
@@ -77,9 +67,13 @@ public final class CertificateManager {
     private static let localDeviceNameKey = "TetherLocalDeviceName"
     private static let lastConnectedFingerprintKey = "TetherLastConnectedFingerprint"
 
-    // Shared UserDefaults suite backed by the App Group container.
-    private static var sharedDefaults: UserDefaults {
-        UserDefaults(suiteName: appGroupID) ?? .standard
+    // Shared UserDefaults suite backed by the App Group container. A sideloaded
+    // build is signed without the App Group, and falls back to the app's own defaults.
+    public static var sharedDefaults: UserDefaults {
+        guard FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) != nil else {
+            return .standard
+        }
+        return UserDefaults(suiteName: appGroupID) ?? .standard
     }
 
     // SHA-256 fingerprint of our own certificate (lowercase hex, no separators).

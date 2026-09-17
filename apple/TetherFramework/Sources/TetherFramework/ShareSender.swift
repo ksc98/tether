@@ -235,7 +235,7 @@ public actor ShareSender {
         }
 
         // 3. Resolve endpoint — prefer direct IP/Port bypass to avoid Local Network Privacy limits in the extension
-        let sharedDefaults = UserDefaults(suiteName: CertificateManager.appGroupID) ?? .standard
+        let sharedDefaults = CertificateManager.sharedDefaults
         let endpoint: NWEndpoint
 
         if let hostStr = sharedDefaults.string(forKey: lastHostKey), !hostStr.isEmpty,
@@ -363,21 +363,21 @@ extension ShareSender {
     /// Called by the main app whenever it connects to a host, so the Share Extension
     /// can later resolve the Bonjour service name without running its own discovery.
     public static func persistLastServiceName(_ name: String) {
-        let sharedDefaults = UserDefaults(suiteName: CertificateManager.appGroupID) ?? .standard
+        let sharedDefaults = CertificateManager.sharedDefaults
         sharedDefaults.set(name, forKey: lastServiceNameKey)
     }
 
     /// Called by the main app once the connection is established to cache the
     /// direct IP and Port, allowing the Share Extension to bypass Bonjour entirely.
     public static func persistLastEndpoint(host: String, port: UInt16) {
-        let sharedDefaults = UserDefaults(suiteName: CertificateManager.appGroupID) ?? .standard
+        let sharedDefaults = CertificateManager.sharedDefaults
         sharedDefaults.set(host, forKey: lastHostKey)
         sharedDefaults.set(Int(port), forKey: lastPortKey)
     }
 
     /// The last endpoint a connection actually resolved to, if one was ever cached.
     public static func lastEndpoint() -> (host: String, port: UInt16)? {
-        let sharedDefaults = UserDefaults(suiteName: CertificateManager.appGroupID) ?? .standard
+        let sharedDefaults = CertificateManager.sharedDefaults
         guard let host = sharedDefaults.string(forKey: lastHostKey), !host.isEmpty,
               let portInt = sharedDefaults.object(forKey: lastPortKey) as? Int,
               portInt > 0, portInt <= Int(UInt16.max) else { return nil }
