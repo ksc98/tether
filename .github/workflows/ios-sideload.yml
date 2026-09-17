@@ -1,8 +1,8 @@
 name: iOS sideload build
 
 # Builds the iOS app with real Xcode so the bundle carries Metadata.appintents,
-# which Shortcuts needs to list the app's actions. The IPA is ad-hoc signed with
-# its entitlements embedded; `xtool install` re-signs it for a device.
+# which Shortcuts needs to list the app's actions. The IPA is the app alone,
+# ad-hoc signed; `xtool install` re-signs it for a device.
 
 on:
   push:
@@ -45,11 +45,12 @@ jobs:
           test -d "$app/Metadata.appintents"
           plutil -p "$app/Metadata.appintents/extract.actionsdata" | grep -E 'Intent"' | sort -u
 
-          # xtool reads each bundle's entitlements from its existing signature.
-          appex=$(find "$app/PlugIns" -maxdepth 1 -name '*.appex')
-          codesign --force --sign - \
-            --entitlements apple/TetherShareExtension/TetherShareExtension.entitlements "$appex"
-          codesign --force --sign - --entitlements apple/Tether/Tether.entitlements "$app"
+          # xtool reads the entitlements to keep from the existing signature. With
+          # App Store Connect API-key auth it cannot provision App Groups, and it gives
+          # the app and the extension separate keychain groups, so the sideload build
+          # drops both the group and the Share Extension that depends on them.
+          rm -rf "$app/PlugIns"
+          codesign --force --sign - --entitlements apple/Tether-sideload.entitlements "$app"
           codesign -d --entitlements - "$app"
 
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
