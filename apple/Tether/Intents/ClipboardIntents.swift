@@ -104,8 +104,11 @@ struct SyncClipboardIntent: AppIntent {
 
         // Compared on the desktop's own clock, so phone and desktop clocks need
         // not agree. A push bumps the desktop's time too, so text that equals the
-        // last synced text is not a desktop change.
-        let desktopChanged = (desktop.changedAt ?? 0) > lastDesktopChangedAt && desktop.text != lastText
+        // last synced text is not a desktop change. With no history at all the
+        // desktop would always look changed; the phone's text is what the user
+        // is holding, so the first sync pushes it.
+        let firstSync = lastDesktopChangedAt == 0 && lastText.isEmpty
+        let desktopChanged = !firstSync && (desktop.changedAt ?? 0) > lastDesktopChangedAt && desktop.text != lastText
         let phoneChanged = !text.isEmpty && text != lastText
 
         func remember(_ synced: String) {
