@@ -9,6 +9,11 @@ Upstream is `zackb/tether`. This file is the working manual for the fork.
 - `kyle`: everything, including fork-only tooling (CI workflow, justfile,
   sideload entitlements, these docs). CI builds from here.
 - `shortcuts-clipboard-intents`: the upstreamable intents feature alone.
+- `bluetooth-clipboard`: the Bluetooth push on top of the intents branch.
+
+Each rebase onto upstream gets an entry in [UPSTREAM-REVIEW.md](UPSTREAM-REVIEW.md):
+what upstream added, whether it was read, and the verdict. The feature
+branches are re-derived from `kyle` after each rebase.
 
 ## Desktop side
 
