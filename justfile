@@ -24,9 +24,10 @@ install:
     branch=$(git rev-parse --abbrev-ref HEAD)
     dir=$(mktemp -d)
     trap 'rm -rf "$dir"' EXIT
+    cp packaging/tether.install "$dir/"
     sed -e "s|^pkgname=.*|pkgname=tether-git|" \
         -e "s|^source=.*|source=(\"git+file://$repo#branch=$branch\")|" \
-        -e "s|^install=.*|install=$repo/packaging/tether.install|" \
+        -e "s|^install=.*|install=tether.install|" \
         PKGBUILD > "$dir/PKGBUILD"
     (cd "$dir" && makepkg -sf --noconfirm)
     sudo pacman -U --noconfirm "$dir"/tether-git-*.pkg.tar.*
