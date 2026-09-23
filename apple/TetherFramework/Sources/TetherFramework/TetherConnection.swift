@@ -27,6 +27,9 @@ public enum ConnectionState: Sendable, Equatable {
 @Observable
 public final class TetherConnection {
     // Current connection state.
+    // The port tetherd listens on. Fixed on the daemon side.
+    public static let daemonPort: UInt16 = 5134
+
     public private(set) var state: ConnectionState = .disconnected
 
     // The server's TLS certificate fingerprint, captured during handshake.
