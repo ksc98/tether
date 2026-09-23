@@ -158,7 +158,11 @@ background relaunch has somewhere to deliver to before any view exists.
 - App in front: hands the text to the view model, which writes the
   pasteboard when Automatic Clipboard Sync is on and records it in the
   clipboard history.
-- App in the background: posts a local notification, category
+- Always stores the copy (text, `seq`, whether complete) in `UserDefaults`
+  (`DesktopClipboardCache`), which is what the Sync Clipboard shortcut pulls
+  from without a Wi-Fi round trip.
+- App in the background and *Notify on Desktop Copies* on (off by default):
+  posts a local notification, category
   `TETHER_DESKTOP_CLIPBOARD`, title `Copied on <desktop name>` (with
   `(excerpt)` when the Wi-Fi fetch failed), body a one-line preview of up to
   200 characters, the full text in `userInfo`, time-sensitive interruption
@@ -212,8 +216,10 @@ app. The shortcut moves the text across that boundary.
 One action for both directions, meant for the Action Button:
 `Get Clipboard → Sync Clipboard → Copy to Clipboard`. iOS gives no time for
 the phone's clipboard, the desktop reports one for its own (`changed_at` in
-`clipboard_content`, milliseconds on the desktop's clock), so the desktop is
-the side that can be known to be newer:
+`clipboard_content`, milliseconds on the desktop's clock; the Bluetooth
+write's `seq` is the same clock), so the desktop is the side that can be
+known to be newer. The desktop clipboard comes from the Bluetooth cache when
+a complete copy is there, else from a Wi-Fi `clipboard_get`:
 
 1. The desktop clipboard changed since the last sync (its `changed_at` is
    above the one remembered, and its text is not the last synced text) and
@@ -226,8 +232,8 @@ The very first sync has no history, so the desktop would always look
 changed; that press pushes the phone's text instead.
 
 The result is always the text the phone should hold, so the shortcut ends
-with *Copy to Clipboard* unconditionally, and the intent's dialog says which
-way it went. The shortcut is built by hand on the phone: iOS imports only
+with *Copy to Clipboard* unconditionally. The intent shows no dialog; the
+direction is written to the app's Bluetooth log. The shortcut is built by hand on the phone: iOS imports only
 `.shortcut` files signed by Apple's `shortcuts sign`, which runs on macOS
 only and needs an iCloud login, so neither Linux nor a CI runner can produce
 one, and no API lets an app install a shortcut. When both sides changed since the last sync the desktop wins,
