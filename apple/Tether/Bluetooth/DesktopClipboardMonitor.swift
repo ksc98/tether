@@ -52,7 +52,7 @@ final class DesktopClipboardMonitor: NSObject {
     private(set) var status: Status = .off {
         didSet {
             if status != oldValue {
-                log.notice("status \(String(describing: oldValue)) -> \(String(describing: self.status))")
+                note("status \(String(describing: oldValue)) -> \(String(describing: self.status))")
                 onStatusChange?(status)
             }
         }
@@ -60,6 +60,27 @@ final class DesktopClipboardMonitor: NSObject {
 
     var onStatusChange: ((Status) -> Void)?
     var onUpdate: ((DesktopClipboardUpdate) -> Void)?
+    var onTrace: (([String]) -> Void)?
+
+    // The last few steps, newest last, for the Settings screen. The phone's
+    // syslog relay does not show an app's os_log lines, so this is what a user
+    // can actually read when the subscription does not come up.
+    private(set) var trace: [String] = []
+    private static let traceLimit = 40
+    private static let traceClock: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
+    private func note(_ line: String) {
+        note("\(line, privacy: .public)")
+        trace.append("\(Self.traceClock.string(from: Date())) \(line)")
+        if trace.count > Self.traceLimit {
+            trace.removeFirst(trace.count - Self.traceLimit)
+        }
+        onTrace?(trace)
+    }
 
     private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
@@ -96,7 +117,7 @@ final class DesktopClipboardMonitor: NSObject {
             self.peripheral = nil
             characteristic = nil
         }
-        log.notice("scanning for the clipboard service")
+        note("scanning for the clipboard service")
         central.scanForPeripherals(withServices: [Self.serviceUUID], options: nil)
         status = .scanning
         scanTimeout?.cancel()
@@ -145,7 +166,7 @@ final class DesktopClipboardMonitor: NSObject {
         guard let central, central.state == .poweredOn else { return }
 
         if let peripheral {
-            log.notice("attach: reusing peripheral \(peripheral.identifier) state \(peripheral.state.rawValue)")
+            note("attach: reusing peripheral \(peripheral.identifier) state \(peripheral.state.rawValue)")
             connect(peripheral)
             return
         }
@@ -153,13 +174,13 @@ final class DesktopClipboardMonitor: NSObject {
         if let stored = UserDefaults.standard.string(forKey: Self.peripheralKey),
            let id = UUID(uuidString: stored),
            let known = central.retrievePeripherals(withIdentifiers: [id]).first {
-            log.notice("attach: remembered peripheral \(id) state \(known.state.rawValue)")
+            note("attach: remembered peripheral \(id) state \(known.state.rawValue)")
             connect(known)
             return
         }
 
         let connected = central.retrieveConnectedPeripherals(withServices: [Self.serviceUUID])
-        log.notice("attach: \(connected.count) system-connected peripheral(s) carry the service")
+        note("attach: \(connected.count) system-connected peripheral(s) carry the service")
         if let first = connected.first {
             connect(first)
             return
@@ -174,7 +195,7 @@ final class DesktopClipboardMonitor: NSObject {
         peripheral.delegate = self
         UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: Self.peripheralKey)
 
-        log.notice("connect: \(peripheral.identifier) name \(peripheral.name ?? "-") state \(peripheral.state.rawValue)")
+        note("connect: \(peripheral.identifier) name \(peripheral.name ?? "-") state \(peripheral.state.rawValue)")
         switch peripheral.state {
         case .connected:
             status = .connecting
@@ -195,7 +216,7 @@ final class DesktopClipboardMonitor: NSObject {
             let text: String
         }
 
-        log.notice("value: \(value.count) bytes")
+        note("value: \(value.count) bytes")
         guard let payload = try? JSONDecoder().decode(Payload.self, from: value) else {
             // A notification is cut to the link MTU; the whole value comes from a read.
             if let peripheral, let characteristic {
@@ -239,7 +260,7 @@ extension DesktopClipboardMonitor: CBCentralManagerDelegate {
     // The central was created with the main queue, so every callback is on the main actor.
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         MainActor.assumeIsolated {
-            log.notice("central state \(central.state.rawValue)")
+            note("central state \(central.state.rawValue)")
             switch central.state {
             case .poweredOn:
                 attach()
@@ -255,7 +276,7 @@ extension DesktopClipboardMonitor: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
         MainActor.assumeIsolated {
-            log.notice("restoring state: \(dict.keys.joined(separator: ","))")
+            note("restoring state: \(dict.keys.joined(separator: ","))")
             if let restored = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
                let first = restored.first {
                 peripheral = first
@@ -273,7 +294,7 @@ extension DesktopClipboardMonitor: CBCentralManagerDelegate {
                                     advertisementData: [String: Any],
                                     rssi RSSI: NSNumber) {
         MainActor.assumeIsolated {
-            log.notice("discovered \(peripheral.identifier) name \(peripheral.name ?? "-") rssi \(RSSI)")
+            note("discovered \(peripheral.identifier) name \(peripheral.name ?? "-") rssi \(RSSI)")
             central.stopScan()
             scanTimeout?.cancel()
             connect(peripheral)
@@ -282,7 +303,7 @@ extension DesktopClipboardMonitor: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         MainActor.assumeIsolated {
-            log.notice("connected \(peripheral.identifier)")
+            note("connected \(peripheral.identifier)")
             peripheral.discoverServices([Self.serviceUUID])
         }
     }
@@ -291,7 +312,7 @@ extension DesktopClipboardMonitor: CBCentralManagerDelegate {
                                     didFailToConnect peripheral: CBPeripheral,
                                     error: Error?) {
         MainActor.assumeIsolated {
-            log.error("connect failed: \(error?.localizedDescription ?? "-")")
+            note("connect failed: \(error?.localizedDescription ?? "-")")
             status = .connecting
             central.connect(peripheral, options: nil)
         }
@@ -301,7 +322,7 @@ extension DesktopClipboardMonitor: CBCentralManagerDelegate {
                                     didDisconnectPeripheral peripheral: CBPeripheral,
                                     error: Error?) {
         MainActor.assumeIsolated {
-            log.notice("disconnected: \(error?.localizedDescription ?? "-")")
+            note("disconnected: \(error?.localizedDescription ?? "-")")
             characteristic = nil
             guard isEnabled else { return }
             status = .connecting
@@ -316,7 +337,7 @@ extension DesktopClipboardMonitor: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         MainActor.assumeIsolated {
             let uuids = (peripheral.services ?? []).map(\.uuid.uuidString).joined(separator: ",")
-            log.notice("services: [\(uuids)] error \(error?.localizedDescription ?? "-")")
+            note("services: [\(uuids)] error \(error?.localizedDescription ?? "-")")
             guard let service = peripheral.services?.first(where: { $0.uuid == Self.serviceUUID }) else {
                 // Connected, but this peripheral does not serve the clipboard: wrong device, or an
                 // older tetherd. iOS may also be holding a stale GATT cache for it.
@@ -332,7 +353,7 @@ extension DesktopClipboardMonitor: CBPeripheralDelegate {
                                 didDiscoverCharacteristicsFor service: CBService,
                                 error: Error?) {
         MainActor.assumeIsolated {
-            log.notice("characteristics: \((service.characteristics ?? []).count) error \(error?.localizedDescription ?? "-")")
+            note("characteristics: \((service.characteristics ?? []).count) error \(error?.localizedDescription ?? "-")")
             guard let found = service.characteristics?.first(where: { $0.uuid == Self.characteristicUUID }) else {
                 status = .unknownDesktop
                 return
@@ -347,7 +368,7 @@ extension DesktopClipboardMonitor: CBPeripheralDelegate {
                                 didUpdateNotificationStateFor characteristic: CBCharacteristic,
                                 error: Error?) {
         MainActor.assumeIsolated {
-            log.notice("notify state \(characteristic.isNotifying) error \(error?.localizedDescription ?? "-")")
+            note("notify state \(characteristic.isNotifying) error \(error?.localizedDescription ?? "-")")
             if characteristic.isNotifying {
                 status = .subscribed
             } else if error != nil {
@@ -362,7 +383,7 @@ extension DesktopClipboardMonitor: CBPeripheralDelegate {
                                 didUpdateValueFor characteristic: CBCharacteristic,
                                 error: Error?) {
         MainActor.assumeIsolated {
-            if let error { log.error("value error: \(error.localizedDescription)") }
+            if let error { note("value error: \(error.localizedDescription)") }
             guard error == nil, let value = characteristic.value, !value.isEmpty else { return }
             handle(value: value)
         }
