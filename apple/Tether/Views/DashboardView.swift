@@ -22,8 +22,9 @@ struct DashboardView: View {
                     // Status Card
                     statusCard
 
-                    // Quick Actions (when connected)
+                    // Speed test and quick actions (when connected)
                     if viewModel.appState == .connected {
+                        speedTestCard
                         quickActions
                     }
 
@@ -142,6 +143,78 @@ struct DashboardView: View {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
+    }
+
+    // MARK: - Speed Test
+
+    private var speedTestCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Speed Test")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let result = viewModel.speedTestResult {
+                    Text(result.measuredAt, style: .relative)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            HStack(spacing: 12) {
+                if let result = viewModel.speedTestResult {
+                    speedTestStat(title: "Ping", value: String(format: "%.0f", result.roundTripMilliseconds), unit: "ms")
+                    speedTestStat(title: "Up", value: String(format: "%.0f", result.uploadMegabitsPerSecond), unit: "Mb/s")
+                    speedTestStat(title: "Down", value: String(format: "%.0f", result.downloadMegabitsPerSecond), unit: "Mb/s")
+                } else if let error = viewModel.speedTestError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text("Measures the Wi-Fi link to the desktop.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Button {
+                    viewModel.runSpeedTest()
+                } label: {
+                    Group {
+                        if viewModel.speedTestRunning {
+                            ProgressView()
+                        } else {
+                            Label("Run", systemImage: "gauge.with.needle")
+                                .labelStyle(.titleAndIcon)
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minWidth: 72)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.speedTestRunning)
+            }
+        }
+    }
+
+    private func speedTestStat(title: LocalizedStringKey, value: String, unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value)
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                Text(unit)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Quick Actions

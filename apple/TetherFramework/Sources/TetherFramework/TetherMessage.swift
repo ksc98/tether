@@ -15,6 +15,7 @@ public enum TetherCommand: String, Codable, Sendable {
     case clipboardSet = "clipboard_set"
     case clipboardGet = "clipboard_get"
     case openUrl = "open_url"
+    case speedTest = "speed_test"
     case fileStart = "file_start"
     case fileChunk = "file_chunk"
     case fileEnd = "file_end"
@@ -27,6 +28,8 @@ public enum TetherCommand: String, Codable, Sendable {
     case clipboardUpdated = "clipboard_updated"
     case clipboardContent = "clipboard_content"
     case fileStatus = "file_status"
+    case speedTestAck = "speed_test_ack"
+    case speedTestPayload = "speed_test_payload"
     case pairPending = "pair_pending"
     case pairAccepted = "pair_accepted"
     case error = "error"
@@ -55,6 +58,10 @@ public struct TetherMessage: Codable, Sendable {
 
     // Clipboard
     public var content: String?
+
+    // Speed test
+    public var seq: Int?
+    public var bytes: Int?
     // clipboard_content: when the desktop clipboard last changed, ms since the epoch.
     public var changedAt: Int64?
 
@@ -82,7 +89,7 @@ public struct TetherMessage: Codable, Sendable {
     public var message: String?
 
     public enum CodingKeys: String, CodingKey {
-        case command, content, filename, size
+        case command, content, filename, size, seq, bytes
         case changedAt = "changed_at"
         case transferId = "transfer_id"
         case chunkIndex = "chunk_index"
@@ -146,6 +153,21 @@ extension TetherMessage {
     // Create a `clipboard_get` request.
     public static func clipboardGet() -> TetherMessage {
         TetherMessage(command: TetherCommand.clipboardGet.rawValue)
+    }
+
+    // Speed test upload: the daemon counts the bytes and acknowledges.
+    public static func speedTestUpload(seq: Int, data: Data) -> TetherMessage {
+        var message = TetherMessage(command: TetherCommand.speedTest.rawValue, data: data.base64EncodedString())
+        message.seq = seq
+        return message
+    }
+
+    // Speed test download: the daemon sends `bytes` bytes back.
+    public static func speedTestDownload(seq: Int, bytes: Int) -> TetherMessage {
+        var message = TetherMessage(command: TetherCommand.speedTest.rawValue)
+        message.seq = seq
+        message.bytes = bytes
+        return message
     }
 
     // Create a `new_otp` message.

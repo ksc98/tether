@@ -32,6 +32,7 @@
 #include "tether/paths.hpp"
 #include "tether/wayland.hpp"
 #include <algorithm>
+#include <random>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -2176,6 +2177,28 @@ namespace tether {
                             set_session_clipboard_images(client_fd);
                         nlohmann::json resp{{"command", "hello"}};
                         resp["features"] = nlohmann::json::array({"clipboard_image"});
+                        std::string payload = resp.dump() + "\n";
+                        robust_ssl_write(ssl, payload.c_str(), payload.size());
+                        continue;
+                    } else if (j.contains("command") && j["command"] == "speed_test") {
+                        // Link measurement for the phone. With "data" it is an upload:
+                        // the bytes are counted and acknowledged. With "bytes" it is a
+                        // download: that many bytes come back. Nothing is stored.
+                        constexpr size_t SPEED_TEST_MAX_BYTES = 8u * 1024 * 1024;
+                        nlohmann::json resp;
+                        resp["seq"] = j.value("seq", 0);
+                        if (j.contains("data") && j["data"].is_string()) {
+                            resp["command"] = "speed_test_ack";
+                            resp["bytes"] = base64_decode(j["data"].get<std::string>()).size();
+                        } else {
+                            const size_t bytes = std::min<size_t>(j.value("bytes", static_cast<size_t>(0)), SPEED_TEST_MAX_BYTES);
+                            std::vector<unsigned char> payload(bytes);
+                            std::mt19937 rng(static_cast<unsigned>(bytes));
+                            for (auto& b : payload)
+                                b = static_cast<unsigned char>(rng());
+                            resp["command"] = "speed_test_payload";
+                            resp["data"] = base64_encode(payload);
+                        }
                         std::string payload = resp.dump() + "\n";
                         robust_ssl_write(ssl, payload.c_str(), payload.size());
                         continue;
