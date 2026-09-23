@@ -30,7 +30,8 @@ install:
         -e "s|^install=.*|install=tether.install|" \
         PKGBUILD > "$dir/PKGBUILD"
     (cd "$dir" && makepkg -sf --noconfirm)
-    sudo pacman -U --noconfirm "$dir"/tether-git-*.pkg.tar.*
+    # yes rather than --noconfirm: the first install must answer the tether-bin conflict prompt.
+    yes | sudo pacman -U "$dir"/tether-git-*.pkg.tar.*
     # A client respawns tetherd on demand; the old one keeps the old code until it exits.
     pkill -f '^tetherd' || true
     tether status >/dev/null 2>&1 || true
