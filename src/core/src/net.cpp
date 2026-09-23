@@ -1492,6 +1492,7 @@ namespace tether {
                             // than the stale text.
                             resp["content"] =
                                 g_wayland->get_clipboard_image().empty() ? g_wayland->get_clipboard() : std::string{};
+                            resp["changed_at"] = g_wayland->clipboard_changed_at();
                             std::string payload = resp.dump() + "\n";
                             write_plain_packet(client_fd, payload);
                             continue;
@@ -2198,6 +2199,8 @@ namespace tether {
                             // Same as the local handler: no stale text behind an image.
                             resp["content"] =
                                 g_wayland->get_clipboard_image().empty() ? g_wayland->get_clipboard() : std::string{};
+                            // When it last changed, so a phone can tell which side is newer.
+                            resp["changed_at"] = g_wayland->clipboard_changed_at();
                             std::string payload = resp.dump() + "\n";
                             robust_ssl_write(ssl, payload.c_str(), payload.size());
                             continue;
