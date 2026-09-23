@@ -13,3 +13,23 @@ ios-install branch="kyle":
     trap 'rm -rf "$dir"' EXIT
     gh run download "$run" --repo ksc98/tether -n Tether-ipa -D "$dir"
     xtool install --usb "$dir/Tether.ipa"
+
+# Build the desktop side from this checkout as an Arch package and install it
+# over tether-bin, so pacman keeps owning /usr/bin/tetherd. makepkg clones the
+# current branch from the working tree, so commit first.
+install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo=$(git rev-parse --show-toplevel)
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    sed -e "s|^pkgname=.*|pkgname=tether-git|" \
+        -e "s|^source=.*|source=(\"git+file://$repo#branch=$branch\")|" \
+        -e "s|^install=.*|install=$repo/packaging/tether.install|" \
+        PKGBUILD > "$dir/PKGBUILD"
+    (cd "$dir" && makepkg -sf --noconfirm)
+    sudo pacman -U --noconfirm "$dir"/tether-git-*.pkg.tar.*
+    # A client respawns tetherd on demand; the old one keeps the old code until it exits.
+    pkill -f '^tetherd' || true
+    tether status >/dev/null 2>&1 || true
