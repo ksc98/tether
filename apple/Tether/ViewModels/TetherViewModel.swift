@@ -91,6 +91,18 @@ final class TetherViewModel {
         }
     }
 
+    // Whether desktop clipboard changes arrive over Bluetooth while the app is
+    // in the background (as a notification with a Copy action).
+    var bluetoothClipboardEnabled: Bool {
+        get { DesktopClipboardService.shared.monitor.isEnabled }
+        set {
+            DesktopClipboardService.shared.setEnabled(newValue)
+            bluetoothClipboardStatus = DesktopClipboardService.shared.monitor.status
+        }
+    }
+
+    private(set) var bluetoothClipboardStatus: DesktopClipboardMonitor.Status = .off
+
     // Overall connection state.
     private(set) var appState: AppConnectionState = .disconnected
 
@@ -146,6 +158,9 @@ final class TetherViewModel {
     private var manualDisconnect = false
     private var currentScenePhase: ScenePhase = .active
 
+    // Last desktop text applied from any transport, so Wi-Fi and Bluetooth do not both apply it.
+    private var lastRemoteClipboardText: String?
+
     // Consecutive failed reconnect attempts, used to space out the retries.
     private var reconnectAttempts = 0
 
@@ -184,9 +199,57 @@ final class TetherViewModel {
         
         setupConnectionHandlers()
         setupServerHandlers()
+        setupDesktopClipboard()
         startDiscovery()
         startServer()
         scheduleAutoReconnectAttempt()
+    }
+
+    // MARK: - Bluetooth clipboard
+
+    private func setupDesktopClipboard() {
+        let service = DesktopClipboardService.shared
+        service.applyClipboard = { [weak self] text in
+            self?.applyDesktopClipboard(text, explicit: true)
+        }
+        service.deviceName = { [weak self] in
+            guard let self else { return nil }
+            if let connectedDeviceName { return connectedDeviceName }
+            guard let fingerprint = certificateManager.lastConnectedFingerprint else { return nil }
+            return certificateManager.knownHosts[fingerprint]
+        }
+        service.monitor.onStatusChange = { [weak self] status in
+            self?.bluetoothClipboardStatus = status
+        }
+        bluetoothClipboardStatus = service.monitor.status
+    }
+
+    // Text the desktop copied, delivered over Bluetooth. `explicit` is a tap on
+    // the notification's Copy action, which writes regardless of the auto-sync
+    // setting; in-front delivery follows it like the Wi-Fi path does.
+    private func applyDesktopClipboard(_ text: String, explicit: Bool) {
+        // The Wi-Fi socket delivers the same change while connected.
+        if text == lastRemoteClipboardText, !explicit { return }
+        lastRemoteClipboardText = text
+
+        let sourceName = connectedDeviceName ?? DesktopClipboardService.shared.deviceName?() ?? "Desktop"
+        let entry = ClipboardEntry(content: text, timestamp: Date(), source: .remote(sourceName))
+        clipboardHistory.insert(entry, at: 0)
+        if clipboardHistory.count > 50 {
+            clipboardHistory = Array(clipboardHistory.prefix(50))
+        }
+        if explicit || autoSyncClipboard {
+            copyToLocalClipboard(text)
+        }
+    }
+
+    // Asks the desktop to advertise its clipboard service, then scans for it.
+    // Only needed once; after that the phone finds it without advertising.
+    func findDesktopOverBluetooth() {
+        if case .connected = appState {
+            connection.send(.btClipboardAdvertise())
+        }
+        DesktopClipboardService.shared.monitor.findDesktop()
     }
 
     // MARK: - Discovery
@@ -687,18 +750,7 @@ final class TetherViewModel {
         switch message.parsedCommand {
         case .clipboardUpdated:
             if let content = message.content {
-                let sourceName = connectedDeviceName ?? "Desktop"
-                let entry = ClipboardEntry(content: content, timestamp: Date(), source: .remote(sourceName))
-                clipboardHistory.insert(entry, at: 0)
-                if clipboardHistory.count > 50 {
-                    clipboardHistory = Array(clipboardHistory.prefix(50))
-                }
-                
-                if autoSyncClipboard {
-                    Task { @MainActor in
-                        copyToLocalClipboard(content)
-                    }
-                }
+                applyDesktopClipboard(content, explicit: false)
             }
 
         case .clipboardContent:
