@@ -204,6 +204,27 @@ in the background, for the other direction and for a pull:
 Neither touches `UIPasteboard` itself, since iOS denies it to a backgrounded
 app. The shortcut moves the text across that boundary.
 
+### Sync Clipboard
+
+One action for both directions, meant for the Action Button:
+`Get Clipboard → Sync Clipboard → Copy to Clipboard`. iOS gives no time for
+the phone's clipboard, the desktop reports one for its own (`changed_at` in
+`clipboard_content`, milliseconds on the desktop's clock), so the desktop is
+the side that can be known to be newer:
+
+1. The desktop clipboard changed since the last sync (its `changed_at` is
+   above the one remembered, and its text is not the last synced text) and
+   differs from the phone's: **pull**. The desktop text is returned.
+2. Otherwise the phone's text differs from the last synced text: **push**
+   (`clipboard_set`). The phone text is returned.
+3. Otherwise nothing changes.
+
+The result is always the text the phone should hold, so the shortcut ends
+with *Copy to Clipboard* unconditionally, and the intent's dialog says which
+way it went. When both sides changed since the last sync the desktop wins,
+because its change is the one with a known time. State (last synced text,
+last desktop `changed_at`) lives in the app's `UserDefaults`.
+
 ## Security
 
 - The characteristic requires an encrypted link. Only the bonded desktop can
