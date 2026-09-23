@@ -16,7 +16,7 @@
 	<string>Used to send photos from your library to your desktop.</string>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
 	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>

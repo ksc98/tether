@@ -248,14 +248,6 @@ final class TetherViewModel {
         }
     }
 
-    // Asks the desktop to advertise its clipboard service, then scans for it.
-    // Only needed once; after that the phone finds it without advertising.
-    func findDesktopOverBluetooth() {
-        if case .connected = appState {
-            connection.send(.btClipboardAdvertise())
-        }
-        DesktopClipboardService.shared.monitor.findDesktop()
-    }
 
     // MARK: - Discovery
 

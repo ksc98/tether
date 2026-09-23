@@ -179,15 +179,6 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        if viewModel.bluetoothClipboardStatus != .subscribed {
-                            Button {
-                                viewModel.findDesktopOverBluetooth()
-                            } label: {
-                                Label("Find Desktop", systemImage: "dot.radiowaves.left.and.right")
-                            }
-                            .disabled(viewModel.bluetoothClipboardStatus == .scanning)
-                        }
-
                         if !viewModel.bluetoothClipboardTrace.isEmpty {
                             DisclosureGroup("Log") {
                                 ForEach(Array(viewModel.bluetoothClipboardTrace.enumerated()), id: \.offset) { _, line in
@@ -202,7 +193,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Bluetooth Clipboard")
                 } footer: {
-                    Text("Tether stays subscribed to the desktop over Bluetooth after you leave the app. A copy on the desktop shows as a notification; tap Copy to put it on this iPhone's clipboard. Finding the desktop needs the Wi-Fi connection once.")
+                    Text("The desktop sends each copy over the Bluetooth link it keeps for notifications, and Tether receives it after you leave the app. A copy shows as a notification; tap Copy to put it on this iPhone's clipboard.")
                 }
 
                 // Connection
@@ -289,10 +280,8 @@ struct SettingsView: View {
         case .off: return "Off"
         case .bluetoothOff: return "Bluetooth is off"
         case .unauthorized: return "Not allowed in Settings"
-        case .unknownDesktop: return "Desktop not found yet"
-        case .scanning: return "Scanning…"
-        case .connecting: return "Waiting for desktop"
-        case .subscribed: return "Subscribed"
+        case .publishing: return "Starting"
+        case .published: return "Ready"
         }
     }
 

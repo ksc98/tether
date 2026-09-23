@@ -2,13 +2,17 @@
 //  DesktopClipboardMonitor.swift
 //  Tether
 //
-//  Subscribes to the clipboard characteristic tetherd serves over Bluetooth LE.
+//  Serves the clipboard characteristic tetherd writes desktop clipboard changes
+//  into, over Bluetooth LE.
 //
-//  The Wi-Fi connection only exists while the app is in the foreground; a GATT
-//  subscription with the bluetooth-central background mode keeps delivering
-//  after the app is backgrounded, and iOS relaunches the app for a notification
-//  if it was terminated. The characteristic value is {"seq":N,"len":L,"text":T};
-//  when the desktop text is longer than the ATT value the rest comes over Wi-Fi.
+//  The Wi-Fi connection only exists while the app is in the foreground. The
+//  iPhone already holds an LE link to the desktop for notification mirroring,
+//  with the phone as the central; iOS does not share that link with an app's
+//  CBCentralManager, but the phone's GATT server is reachable on it. So the app
+//  publishes the characteristic (CBPeripheralManager, bluetooth-peripheral
+//  background mode) and iOS wakes the app for each write, relaunching it if it
+//  was terminated. The value is {"seq":N,"len":L,"text":T}; when the desktop
+//  text is longer than the attribute the rest comes over Wi-Fi.
 //
 
 import CoreBluetooth
@@ -34,19 +38,15 @@ final class DesktopClipboardMonitor: NSObject {
 
     private static let restoreIdentifier = "net.jeedup.Tether.desktop-clipboard"
     private static let enabledKey = "TetherBluetoothClipboardEnabled"
-    private static let peripheralKey = "TetherBluetoothClipboardPeripheral"
     private static let lastSeqKey = "TetherBluetoothClipboardLastSeq"
-    private static let scanSeconds: Double = 30
 
     enum Status: Equatable {
         case off
         case bluetoothOff
         case unauthorized
-        // No desktop known yet; a scan is needed.
-        case unknownDesktop
-        case scanning
-        case connecting
-        case subscribed
+        case publishing
+        // The characteristic is in the phone's GATT table; the desktop can write to it.
+        case published
     }
 
     private(set) var status: Status = .off {
@@ -64,7 +64,7 @@ final class DesktopClipboardMonitor: NSObject {
 
     // The last few steps, newest last, for the Settings screen. The phone's
     // syslog relay does not show an app's os_log lines, so this is what a user
-    // can actually read when the subscription does not come up.
+    // can actually read when the characteristic does not come up.
     private(set) var trace: [String] = []
     private static let traceLimit = 40
     private static let traceClock: DateFormatter = {
@@ -82,10 +82,9 @@ final class DesktopClipboardMonitor: NSObject {
         onTrace?(trace)
     }
 
-    private var central: CBCentralManager?
-    private var peripheral: CBPeripheral?
-    private var characteristic: CBCharacteristic?
-    private var scanTimeout: Task<Void, Never>?
+    private var manager: CBPeripheralManager?
+    private var service: CBMutableService?
+    private var serviceAdded = false
     private var pendingFetch: Task<Void, Never>?
 
     var isEnabled: Bool {
@@ -93,118 +92,67 @@ final class DesktopClipboardMonitor: NSObject {
     }
 
     // Called at every launch, including a background relaunch by CoreBluetooth:
-    // the central has to exist again before iOS hands back the restored state.
+    // the manager has to exist again before iOS hands back the restored state.
     func launch() {
         guard isEnabled else { return }
-        makeCentral()
+        makeManager()
     }
 
     func setEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: Self.enabledKey)
         if enabled {
-            makeCentral()
+            makeManager()
         } else {
             tearDown()
         }
     }
 
-    // Looks for the desktop in a scan. The daemon has to be advertising the
-    // service for this to find anything; the caller asks it to over Wi-Fi first.
-    func findDesktop() {
-        guard let central, central.state == .poweredOn else { return }
-        if let peripheral {
-            central.cancelPeripheralConnection(peripheral)
-            self.peripheral = nil
-            characteristic = nil
-        }
-        note("scanning for the clipboard service")
-        central.scanForPeripherals(withServices: [Self.serviceUUID], options: nil)
-        status = .scanning
-        scanTimeout?.cancel()
-        scanTimeout = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.scanSeconds))
-            guard let self, !Task.isCancelled, status == .scanning else { return }
-            central.stopScan()
-            status = .unknownDesktop
-        }
-    }
-
     // MARK: - Setup
 
-    private func makeCentral() {
-        guard central == nil else {
-            attach()
+    private func makeManager() {
+        guard manager == nil else {
+            publish()
             return
         }
-        central = CBCentralManager(
+        manager = CBPeripheralManager(
             delegate: self,
             queue: nil,
             options: [
-                CBCentralManagerOptionRestoreIdentifierKey: Self.restoreIdentifier,
-                CBCentralManagerOptionShowPowerAlertKey: false,
+                CBPeripheralManagerOptionRestoreIdentifierKey: Self.restoreIdentifier,
+                CBPeripheralManagerOptionShowPowerAlertKey: false,
             ]
         )
     }
 
     private func tearDown() {
-        scanTimeout?.cancel()
         pendingFetch?.cancel()
-        if let central, let peripheral {
-            central.cancelPeripheralConnection(peripheral)
-        }
-        central?.stopScan()
-        central = nil
-        peripheral = nil
-        characteristic = nil
+        manager?.removeAllServices()
+        manager = nil
+        service = nil
+        serviceAdded = false
         status = .off
     }
 
-    // Finds the desktop without a scan when it can: a peripheral restored by
-    // iOS, the one remembered from last time, or one the system already holds a
-    // connection to (it does, for notification mirroring) that carries the service.
-    private func attach() {
-        guard let central, central.state == .poweredOn else { return }
-
-        if let peripheral {
-            note("attach: reusing peripheral \(peripheral.identifier) state \(peripheral.state.rawValue)")
-            connect(peripheral)
+    private func publish() {
+        guard let manager, manager.state == .poweredOn else { return }
+        if serviceAdded {
+            status = .published
             return
         }
-
-        if let stored = UserDefaults.standard.string(forKey: Self.peripheralKey),
-           let id = UUID(uuidString: stored),
-           let known = central.retrievePeripherals(withIdentifiers: [id]).first {
-            note("attach: remembered peripheral \(id) state \(known.state.rawValue)")
-            connect(known)
-            return
-        }
-
-        let connected = central.retrieveConnectedPeripherals(withServices: [Self.serviceUUID])
-        note("attach: \(connected.count) system-connected peripheral(s) carry the service")
-        if let first = connected.first {
-            connect(first)
-            return
-        }
-
-        status = .unknownDesktop
-    }
-
-    private func connect(_ peripheral: CBPeripheral) {
-        guard let central else { return }
-        self.peripheral = peripheral
-        peripheral.delegate = self
-        UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: Self.peripheralKey)
-
-        note("connect: \(peripheral.identifier) name \(peripheral.name ?? "-") state \(peripheral.state.rawValue)")
-        switch peripheral.state {
-        case .connected:
-            status = .connecting
-            peripheral.discoverServices([Self.serviceUUID])
-        default:
-            status = .connecting
-            // A pending connect never times out; it completes whenever the desktop is in range.
-            central.connect(peripheral, options: nil)
-        }
+        // Write only, and only over an encrypted link: the phone's bond with
+        // the desktop provides that, and nobody else gets to set the clipboard.
+        let characteristic = CBMutableCharacteristic(
+            type: Self.characteristicUUID,
+            properties: [.write],
+            value: nil,
+            permissions: [.writeEncryptionRequired]
+        )
+        let service = CBMutableService(type: Self.serviceUUID, primary: true)
+        service.characteristics = [characteristic]
+        self.service = service
+        status = .publishing
+        note("adding service")
+        manager.add(service)
     }
 
     // MARK: - Value handling
@@ -216,12 +164,9 @@ final class DesktopClipboardMonitor: NSObject {
             let text: String
         }
 
-        note("value: \(value.count) bytes")
+        note("write: \(value.count) bytes")
         guard let payload = try? JSONDecoder().decode(Payload.self, from: value) else {
-            // A notification is cut to the link MTU; the whole value comes from a read.
-            if let peripheral, let characteristic {
-                peripheral.readValue(for: characteristic)
-            }
+            note("write: not a clipboard payload")
             return
         }
 
@@ -252,21 +197,42 @@ final class DesktopClipboardMonitor: NSObject {
             self?.onUpdate?(update)
         }
     }
+
+    // Reassembles one write from its chunks. A long write arrives as a batch
+    // of requests, each carrying its offset.
+    private static func assemble(_ requests: [CBATTRequest]) -> Data {
+        var value = Data()
+        for request in requests.sorted(by: { $0.offset < $1.offset }) {
+            guard let chunk = request.value else { continue }
+            if value.count < request.offset {
+                value.append(Data(count: request.offset - value.count))
+            }
+            let end = request.offset + chunk.count
+            if end <= value.count {
+                value.replaceSubrange(request.offset..<end, with: chunk)
+            } else {
+                value.removeSubrange(request.offset..<value.count)
+                value.append(chunk)
+            }
+        }
+        return value
+    }
 }
 
-// MARK: - CBCentralManagerDelegate
+// MARK: - CBPeripheralManagerDelegate
 
-extension DesktopClipboardMonitor: CBCentralManagerDelegate {
-    // The central was created with the main queue, so every callback is on the main actor.
-    nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
+extension DesktopClipboardMonitor: CBPeripheralManagerDelegate {
+    // The manager was created with the main queue, so every callback is on the main actor.
+    nonisolated func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
         MainActor.assumeIsolated {
-            note("central state \(central.state.rawValue)")
-            switch central.state {
+            note("manager state \(peripheral.state.rawValue)")
+            switch peripheral.state {
             case .poweredOn:
-                attach()
+                publish()
             case .unauthorized:
                 status = .unauthorized
             case .poweredOff, .resetting, .unsupported, .unknown:
+                serviceAdded = false
                 status = .bluetoothOff
             @unknown default:
                 status = .bluetoothOff
@@ -274,126 +240,45 @@ extension DesktopClipboardMonitor: CBCentralManagerDelegate {
         }
     }
 
-    nonisolated func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+    nonisolated func peripheralManager(_ peripheral: CBPeripheralManager, willRestoreState dict: [String: Any]) {
         MainActor.assumeIsolated {
-            note("restoring state: \(dict.keys.joined(separator: ","))")
-            if let restored = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
-               let first = restored.first {
-                peripheral = first
-                first.delegate = self
-                characteristic = first.services?
-                    .first { $0.uuid == Self.serviceUUID }?
-                    .characteristics?
-                    .first { $0.uuid == Self.characteristicUUID }
+            let restored = dict[CBPeripheralManagerRestoredStateServicesKey] as? [CBMutableService] ?? []
+            note("restoring state: \(restored.count) service(s)")
+            if let ours = restored.first(where: { $0.uuid == Self.serviceUUID }) {
+                service = ours
+                serviceAdded = true
             }
         }
     }
 
-    nonisolated func centralManager(_ central: CBCentralManager,
-                                    didDiscover peripheral: CBPeripheral,
-                                    advertisementData: [String: Any],
-                                    rssi RSSI: NSNumber) {
+    nonisolated func peripheralManager(_ peripheral: CBPeripheralManager,
+                                       didAdd service: CBService,
+                                       error: Error?) {
         MainActor.assumeIsolated {
-            note("discovered \(peripheral.identifier) name \(peripheral.name ?? "-") rssi \(RSSI)")
-            central.stopScan()
-            scanTimeout?.cancel()
-            connect(peripheral)
-        }
-    }
-
-    nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        MainActor.assumeIsolated {
-            note("connected \(peripheral.identifier)")
-            peripheral.discoverServices([Self.serviceUUID])
-        }
-    }
-
-    nonisolated func centralManager(_ central: CBCentralManager,
-                                    didFailToConnect peripheral: CBPeripheral,
-                                    error: Error?) {
-        MainActor.assumeIsolated {
-            note("connect failed: \(error?.localizedDescription ?? "-")")
-            status = .connecting
-            central.connect(peripheral, options: nil)
-        }
-    }
-
-    nonisolated func centralManager(_ central: CBCentralManager,
-                                    didDisconnectPeripheral peripheral: CBPeripheral,
-                                    error: Error?) {
-        MainActor.assumeIsolated {
-            note("disconnected: \(error?.localizedDescription ?? "-")")
-            characteristic = nil
-            guard isEnabled else { return }
-            status = .connecting
-            central.connect(peripheral, options: nil)
-        }
-    }
-}
-
-// MARK: - CBPeripheralDelegate
-
-extension DesktopClipboardMonitor: CBPeripheralDelegate {
-    nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        MainActor.assumeIsolated {
-            let uuids = (peripheral.services ?? []).map(\.uuid.uuidString).joined(separator: ",")
-            note("services: [\(uuids)] error \(error?.localizedDescription ?? "-")")
-            guard let service = peripheral.services?.first(where: { $0.uuid == Self.serviceUUID }) else {
-                // Connected, but this peripheral does not serve the clipboard: wrong device, or an
-                // older tetherd. iOS may also be holding a stale GATT cache for it.
-                UserDefaults.standard.removeObject(forKey: Self.peripheralKey)
-                status = .unknownDesktop
+            if let error {
+                note("add service failed: \(error.localizedDescription)")
+                serviceAdded = false
+                status = .bluetoothOff
                 return
             }
-            peripheral.discoverCharacteristics([Self.characteristicUUID], for: service)
+            note("service added")
+            serviceAdded = true
+            status = .published
         }
     }
 
-    nonisolated func peripheral(_ peripheral: CBPeripheral,
-                                didDiscoverCharacteristicsFor service: CBService,
-                                error: Error?) {
+    nonisolated func peripheralManager(_ peripheral: CBPeripheralManager,
+                                       didReceiveWrite requests: [CBATTRequest]) {
         MainActor.assumeIsolated {
-            note("characteristics: \((service.characteristics ?? []).count) error \(error?.localizedDescription ?? "-")")
-            guard let found = service.characteristics?.first(where: { $0.uuid == Self.characteristicUUID }) else {
-                status = .unknownDesktop
+            guard let first = requests.first else { return }
+            let ours = requests.filter { $0.characteristic.uuid == Self.characteristicUUID }
+            guard !ours.isEmpty else {
+                peripheral.respond(to: first, withResult: .attributeNotFound)
                 return
             }
-            characteristic = found
-            peripheral.setNotifyValue(true, for: found)
-            peripheral.readValue(for: found)
-        }
-    }
-
-    nonisolated func peripheral(_ peripheral: CBPeripheral,
-                                didUpdateNotificationStateFor characteristic: CBCharacteristic,
-                                error: Error?) {
-        MainActor.assumeIsolated {
-            note("notify state \(characteristic.isNotifying) error \(error?.localizedDescription ?? "-")")
-            if characteristic.isNotifying {
-                status = .subscribed
-            } else if error != nil {
-                // encrypt-notify refused: the LE bond is missing. Keep the connection; a
-                // read still works once the link is encrypted.
-                status = .connecting
-            }
-        }
-    }
-
-    nonisolated func peripheral(_ peripheral: CBPeripheral,
-                                didUpdateValueFor characteristic: CBCharacteristic,
-                                error: Error?) {
-        MainActor.assumeIsolated {
-            if let error { note("value error: \(error.localizedDescription)") }
-            guard error == nil, let value = characteristic.value, !value.isEmpty else { return }
+            let value = Self.assemble(ours)
+            peripheral.respond(to: first, withResult: .success)
             handle(value: value)
-        }
-    }
-
-    nonisolated func peripheral(_ peripheral: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
-        MainActor.assumeIsolated {
-            // tetherd restarted or was upgraded; its handles moved.
-            characteristic = nil
-            peripheral.discoverServices([Self.serviceUUID])
         }
     }
 }
