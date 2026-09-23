@@ -212,8 +212,6 @@ static const Opt kOptions[] = {
     {"--bt-solicit",
      N_("Re-advertise for ANCS so the iPhone shows its permission toggles again, without removing "
         "the bond.")},
-    {"--bt-clipboard-advertise [seconds]",
-     N_("Advertise the clipboard service over Bluetooth LE so the iPhone app can find this machine.")},
     {"--bt-enable <on|off>", N_("Connect to the iPhone over Bluetooth, or stop.")},
     {"--bt-ancs <on|off>", N_("Turn notification mirroring on or off.")},
     {"--bt-ancs-content <on|off>", N_("Mirror notification titles and bodies, not just the app.")},
@@ -1360,10 +1358,6 @@ int main(int argc, char* argv[]) {
                 arg_val2 = argv[++i];
         } else if (arg == "--bt-solicit") {
             action = "bt_solicit";
-        } else if (arg == "--bt-clipboard-advertise") {
-            action = "bt_clipboard_advertise";
-            if (i + 1 < argc && argv[i + 1][0] != '-')
-                arg_val = argv[++i];
         } else if (arg == "--bt-enable") {
             action = "bt_enable";
             if (i + 1 < argc && argv[i + 1][0] != '-')
@@ -1678,11 +1672,6 @@ int main(int argc, char* argv[]) {
         return run_bt_transaction(client, action == "bt_pair" ? "bt_pair" : "bt_unpair", arg_val, extra);
     } else if (action == "bt_solicit") {
         return run_bt_transaction(client, "bt_solicit");
-    } else if (action == "bt_clipboard_advertise") {
-        nlohmann::json extra;
-        if (!arg_val.empty())
-            extra["seconds"] = std::atoi(arg_val.c_str());
-        return run_bt_transaction(client, "bt_clipboard_advertise", "", extra);
     } else if (action == "bt_enable") {
         if (arg_val != "on" && arg_val != "off") {
             debug::log(ERR, _("Expected on or off, e.g. --bt-enable off\n"));
