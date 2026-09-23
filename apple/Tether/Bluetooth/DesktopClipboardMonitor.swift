@@ -194,8 +194,8 @@ final class DesktopClipboardMonitor: NSObject {
 
             let update: DesktopClipboardUpdate
             switch await ShareSender.fetchClipboard() {
-            case .success(let full) where full.utf8.count >= payload.len:
-                update = DesktopClipboardUpdate(seq: payload.seq, text: full, complete: true)
+            case .success(let desktop) where desktop.text.utf8.count >= payload.len:
+                update = DesktopClipboardUpdate(seq: payload.seq, text: desktop.text, complete: true)
             default:
                 update = DesktopClipboardUpdate(seq: payload.seq, text: payload.text, complete: false)
             }

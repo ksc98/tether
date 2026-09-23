@@ -153,11 +153,19 @@ public actor ShareSender {
         return results
     }
 
+    /// The desktop clipboard as the daemon reports it.
+    public struct DesktopClipboard: Sendable {
+        public let text: String
+        // When it last changed on the desktop, ms since the epoch on the desktop's clock.
+        // nil from a daemon that predates the field.
+        public let changedAt: Int64?
+    }
+
     /// Fetch the desktop's current clipboard text from the paired tetherd daemon.
     ///
-    /// Used by the Shortcuts intent, which runs with the app in the background
+    /// Used by the Shortcuts intents, which run with the app in the background
     /// where no live connection exists.
-    public static func fetchClipboard() async -> Result<String, Error> {
+    public static func fetchClipboard() async -> Result<DesktopClipboard, Error> {
         let connection: TetherConnection
         switch await connectToLastKnownHost() {
         case .success(let conn):
@@ -166,14 +174,15 @@ public actor ShareSender {
             return .failure(error)
         }
 
-        let result: Result<String, Error> = await withCheckedContinuation { continuation in
+        let result: Result<DesktopClipboard, Error> = await withCheckedContinuation { continuation in
             let once = ResumeOnce()
 
             connection.onMessage = { message in
                 switch message.parsedCommand {
                 case .clipboardContent:
                     if once.claim() {
-                        continuation.resume(returning: .success(message.content ?? ""))
+                        continuation.resume(returning: .success(
+                            DesktopClipboard(text: message.content ?? "", changedAt: message.changedAt)))
                     }
                 case .error:
                     if once.claim() {
