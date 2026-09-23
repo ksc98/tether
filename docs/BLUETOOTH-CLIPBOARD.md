@@ -197,6 +197,28 @@ background relaunch has somewhere to deliver to before any view exists.
 `UIBackgroundModes` = `bluetooth-peripheral`, plus
 `NSBluetoothAlwaysUsageDescription`.
 
+## Clipboard history
+
+`ClipboardHistoryStore` (`apple/Tether/Clipboard/`) keeps the history on disk
+under Application Support: `index.json` for the entries, `images/<uuid>.png`
+for image entries. Every path records there: the Wi-Fi session (sent, got,
+updated, image transfers), Bluetooth deliveries in the background, the Sync
+Clipboard shortcut (both directions) and a tapped notification. A repeat of
+an existing entry (same SHA-256) moves it to the top instead of duplicating.
+Caps: 200 entries, 40 images, 32 MB per image. The Clipboard tab lists text
+and thumbnails regardless of the connection state, with search, tap to copy,
+swipe to delete, and a context menu (Copy, Send to Desktop, Share, Delete).
+
+## Speed test
+
+The Dashboard's Speed Test card measures the Wi-Fi session: three empty
+`speed_test` exchanges for the round trip (median), four 512 KiB uploads
+(`speed_test` with `data`, answered by `speed_test_ack` with the byte count),
+and one 2 MiB download (`speed_test` with `bytes`, answered by
+`speed_test_payload`). Rates are for raw bytes before base64, over the same
+TLS connection the clipboard uses. The daemon caps a download at 8 MiB and
+stores nothing.
+
 ## Related: Shortcuts actions
 
 Independent of Bluetooth, the fork adds two App Intents that run with the app
