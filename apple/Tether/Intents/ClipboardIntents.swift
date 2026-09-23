@@ -89,17 +89,24 @@ struct SyncClipboardIntent: AppIntent {
     private static let lastDesktopChangedAtKey = "TetherSyncLastDesktopChangedAt"
     private static let lastTextKey = "TetherSyncLastText"
 
-    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ReturnsValue<String> {
         let defaults = UserDefaults.standard
         let lastDesktopChangedAt = Int64(defaults.integer(forKey: Self.lastDesktopChangedAtKey))
         let lastText = defaults.string(forKey: Self.lastTextKey) ?? ""
 
+        // A copy that arrived over Bluetooth is the desktop clipboard as of its
+        // seq (the desktop's clock, like changed_at); when it is complete there
+        // is no need to ask over Wi-Fi.
         let desktop: ShareSender.DesktopClipboard
-        switch await ShareSender.fetchClipboard() {
-        case .success(let fetched):
-            desktop = fetched
-        case .failure(let error):
-            throw ClipboardIntentError.failed(error.localizedDescription)
+        if let cached = await DesktopClipboardCache.load(), cached.complete {
+            desktop = ShareSender.DesktopClipboard(text: cached.text, changedAt: cached.seq)
+        } else {
+            switch await ShareSender.fetchClipboard() {
+            case .success(let fetched):
+                desktop = fetched
+            case .failure(let error):
+                throw ClipboardIntentError.failed(error.localizedDescription)
+            }
         }
 
         // Compared on the desktop's own clock, so phone and desktop clocks need
@@ -118,23 +125,31 @@ struct SyncClipboardIntent: AppIntent {
             }
         }
 
+        // No result card: a Done button on every press is more than the action
+        // deserves. The direction goes to the app's Bluetooth log.
+        let service = await DesktopClipboardService.shared
+
         if desktopChanged, !desktop.text.isEmpty, desktop.text != text {
             remember(desktop.text)
-            return .result(value: desktop.text, dialog: "Pulled from the desktop")
+            await service.clearNotification()
+            await service.monitor.noteExternal("sync: pulled \(desktop.text.count) chars")
+            return .result(value: desktop.text)
         }
 
         if phoneChanged, desktop.text != text {
             switch await ShareSender.send(.clipboard(text)) {
             case .success:
                 remember(text)
-                return .result(value: text, dialog: "Sent to the desktop")
+                await service.monitor.noteExternal("sync: sent \(text.count) chars")
+                return .result(value: text)
             case .failure(let error):
                 throw ClipboardIntentError.failed(error.localizedDescription)
             }
         }
 
         remember(text.isEmpty ? desktop.text : text)
-        return .result(value: text.isEmpty ? desktop.text : text, dialog: "Already in sync")
+        await service.monitor.noteExternal("sync: already in sync")
+        return .result(value: text.isEmpty ? desktop.text : text)
     }
 }
 
