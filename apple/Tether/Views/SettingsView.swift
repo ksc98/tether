@@ -150,6 +150,51 @@ struct SettingsView: View {
                     Text("When enabled, the iPhone's clipboard will be updated immediately when a connected desktop clipboard changes.")
                 }
 
+                // Bluetooth clipboard
+                Section {
+                    Toggle(isOn: Bindable(viewModel).bluetoothClipboardEnabled) {
+                        HStack(spacing: 14) {
+                            Image(systemName: "bolt.horizontal.circle")
+                                .font(.title3)
+                                .foregroundStyle(.blue)
+                                .frame(width: 32)
+                                .accessibilityHidden(true)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Desktop Copies in Background")
+                                    .font(.body.weight(.medium))
+
+                                Text("Notify when the desktop clipboard changes")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    if viewModel.bluetoothClipboardEnabled {
+                        HStack {
+                            Text("Bluetooth")
+                            Spacer()
+                            Text(bluetoothClipboardStatusText)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if viewModel.bluetoothClipboardStatus == .unknownDesktop
+                            || viewModel.bluetoothClipboardStatus == .scanning {
+                            Button {
+                                viewModel.findDesktopOverBluetooth()
+                            } label: {
+                                Label("Find Desktop", systemImage: "dot.radiowaves.left.and.right")
+                            }
+                            .disabled(viewModel.bluetoothClipboardStatus == .scanning)
+                        }
+                    }
+                } header: {
+                    Text("Bluetooth Clipboard")
+                } footer: {
+                    Text("Tether stays subscribed to the desktop over Bluetooth after you leave the app. A copy on the desktop shows as a notification; tap Copy to put it on this iPhone's clipboard. Finding the desktop needs the Wi-Fi connection once.")
+                }
+
                 // Connection
                 Section {
                     HStack {
@@ -228,6 +273,18 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    private var bluetoothClipboardStatusText: String {
+        switch viewModel.bluetoothClipboardStatus {
+        case .off: return "Off"
+        case .bluetoothOff: return "Bluetooth is off"
+        case .unauthorized: return "Not allowed in Settings"
+        case .unknownDesktop: return "Desktop not found yet"
+        case .scanning: return "Scanning…"
+        case .connecting: return "Waiting for desktop"
+        case .subscribed: return "Subscribed"
+        }
+    }
 
     private func formatFingerprint(_ fp: String) -> String {
         var result = ""

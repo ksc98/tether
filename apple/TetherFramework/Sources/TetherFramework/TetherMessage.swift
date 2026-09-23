@@ -22,6 +22,7 @@ public enum TetherCommand: String, Codable, Sendable {
     case newOtp = "new_otp"
     // Both directions: announces optional protocol features.
     case hello = "hello"
+    case btClipboardAdvertise = "bt_clipboard_advertise"
 
     // Daemon → Client
     case clipboardUpdated = "clipboard_updated"
@@ -29,6 +30,7 @@ public enum TetherCommand: String, Codable, Sendable {
     case fileStatus = "file_status"
     case pairPending = "pair_pending"
     case pairAccepted = "pair_accepted"
+    case btClipboardAdvertiseResult = "bt_clipboard_advertise_result"
     case error = "error"
 
     // Commands a peer may send before it is pinned as a known host. Inbound means
@@ -143,6 +145,12 @@ extension TetherMessage {
     // Create a `clipboard_get` request.
     public static func clipboardGet() -> TetherMessage {
         TetherMessage(command: TetherCommand.clipboardGet.rawValue)
+    }
+
+    // Ask the daemon to advertise its clipboard service over Bluetooth LE, so
+    // this phone can find it in a scan.
+    public static func btClipboardAdvertise() -> TetherMessage {
+        TetherMessage(command: TetherCommand.btClipboardAdvertise.rawValue)
     }
 
     // Create a `new_otp` message.
