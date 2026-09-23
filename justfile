@@ -35,22 +35,3 @@ install:
     # A client respawns tetherd on demand; the old one keeps the old code until it exits.
     pkill -f '^tetherd' || true
     tether status >/dev/null 2>&1 || true
-
-# Build the "Sync Clipboard" shortcut, sign it on a Mac that is signed into
-# iCloud (`shortcuts sign` insists on that, so no CI runner can), and send it
-# to the phone over Tether's file transfer. The app has to be open and
-# connected over Wi-Fi. On the phone, open the file from the Files tab and
-# Shortcuts imports it.
-ios-shortcut mac bundle="XTL-E8FE8F29.net.jeedup.Tether" team="2DRNAXC5AQ":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    dir=$(mktemp -d)
-    trap 'rm -rf "$dir"' EXIT
-    python3 apple/shortcuts/make_sync_shortcut.py --bundle-id "{{bundle}}" --team-id "{{team}}" \
-        -o "$dir/unsigned.shortcut"
-    remote=$(ssh "{{mac}}" 'mktemp -d')
-    scp -q "$dir/unsigned.shortcut" "{{mac}}:$remote/"
-    ssh "{{mac}}" "shortcuts sign --mode anyone --input '$remote/unsigned.shortcut' --output '$remote/Sync Clipboard.shortcut'"
-    scp -q "{{mac}}:$remote/Sync Clipboard.shortcut" "$dir/"
-    ssh "{{mac}}" "rm -rf '$remote'"
-    tether send "$dir/Sync Clipboard.shortcut"
