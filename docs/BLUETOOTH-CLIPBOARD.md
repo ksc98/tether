@@ -162,10 +162,12 @@ background relaunch has somewhere to deliver to before any view exists.
   level. One fixed request identifier, so a newer copy replaces the previous
   notification instead of stacking.
 - The category has one action, **Copy**, with the `.foreground` option. Both
-  Copy and a plain tap open the app. The response handler passes the text to
-  the view model, which holds it until the scene reports `.active` and only
-  then writes the pasteboard, because iOS drops writes made during the
-  foreground transition.
+  Copy and a plain tap open the app. The response handler writes the
+  pasteboard itself, holding the text until `didBecomeActive` when the app is
+  still coming to the front (iOS drops writes made during the transition). It
+  does not go through the view model: after a background relaunch by
+  CoreBluetooth no view exists, so the view model is never initialised, and
+  a tap has to work in that state.
 
 ### View model
 
