@@ -162,6 +162,9 @@ final class TetherViewModel {
     // Last desktop text applied from any transport, so Wi-Fi and Bluetooth do not both apply it.
     private var lastRemoteClipboardText: String?
 
+    // Text waiting for the app to become active before it can go on the pasteboard.
+    private var pendingPasteboardText: String?
+
     // Consecutive failed reconnect attempts, used to space out the retries.
     private var reconnectAttempts = 0
 
@@ -243,8 +246,13 @@ final class TetherViewModel {
         if clipboardHistory.count > 50 {
             clipboardHistory = Array(clipboardHistory.prefix(50))
         }
-        if explicit || autoSyncClipboard {
+        guard explicit || autoSyncClipboard else { return }
+        // A notification tap arrives while the app is still coming to the
+        // front, and iOS drops pasteboard writes until it is active.
+        if UIApplication.shared.applicationState == .active {
             copyToLocalClipboard(text)
+        } else {
+            pendingPasteboardText = text
         }
     }
 
@@ -276,6 +284,10 @@ final class TetherViewModel {
             reconnectAttempts = 0
             startServer()
             refreshDiscovery()
+            if let text = pendingPasteboardText {
+                pendingPasteboardText = nil
+                copyToLocalClipboard(text)
+            }
         case .background:
             pendingReconnectTask?.cancel()
             pendingReconnectTask = nil
