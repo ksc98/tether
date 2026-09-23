@@ -228,15 +228,19 @@ namespace tether::bluetooth {
 
                 bool gone = false;
                 std::string err = write_value(conn, path, value, gone);
-                if (!err.empty() && gone) {
-                    // The phone re-published its services; look the path up again.
+                // The phone re-published its services (app reinstalled or
+                // relaunched), so the path moved. BlueZ re-enumerates on the
+                // Service Changed indication, which takes a moment.
+                for (int attempt = 0; !err.empty() && gone && attempt < 5; ++attempt) {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
                     path = find_characteristic(conn, device_path);
                     {
                         std::lock_guard<std::mutex> lock(state->mutex);
                         state->char_path = path;
                     }
-                    if (!path.empty())
-                        err = write_value(conn, path, value, gone);
+                    if (path.empty())
+                        continue;
+                    err = write_value(conn, path, value, gone);
                 }
 
                 if (err.empty()) {
