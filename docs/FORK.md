@@ -48,7 +48,13 @@ and uploads `Tether.ipa`.
 
 ```
 just ios-install        # newest successful CI IPA → xtool install --usb
+just ios-build          # build on home@m4m-1 over ssh instead, then install
 ```
+
+`ios-build` needs Xcode.app on the Mac (`~/bin/xcodes install --latest
+--experimental-unxip --directory /Applications --select`, Apple ID login
+once). It builds the working tree as it is, so uncommitted changes can be
+tried on the phone without a push.
 
 `xtool install` re-signs with the personal team: the bundle becomes
 `XTL-<id>.net.jeedup.Tether`, a separate app from the App Store Tether with
