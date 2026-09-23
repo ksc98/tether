@@ -30,32 +30,6 @@ enum AppTab: Hashable {
     case settings
 }
 
-// A clipboard history entry.
-struct ClipboardEntry: Identifiable {
-    let id = UUID()
-    let content: String
-    let timestamp: Date
-    let source: ClipboardSource
-    var image: Data? = nil // PNG bytes when the entry is an image
-
-    enum ClipboardSource: Equatable {
-        case local(String)
-        case remote(String)
-        
-        var displayName: String {
-            switch self {
-            case .local(let name): return name
-            case .remote(let name): return name
-            }
-        }
-
-        var isRemote: Bool {
-            if case .remote = self { return true }
-            return false
-        }
-    }
-}
-
 // Tracks an active file transfer.
 struct FileTransfer: Identifiable {
     enum Direction {
@@ -103,6 +77,108 @@ final class TetherViewModel {
 
     private(set) var bluetoothClipboardStatus: DesktopClipboardMonitor.Status = .off
 
+    // MARK: - Speed test
+
+    struct SpeedTestResult: Equatable {
+        let roundTripMilliseconds: Double
+        let uploadMegabitsPerSecond: Double
+        let downloadMegabitsPerSecond: Double
+        let measuredAt: Date
+    }
+
+    private(set) var speedTestRunning = false
+    private(set) var speedTestResult: SpeedTestResult?
+    private(set) var speedTestError: String?
+
+    // Replies the running speed test is waiting for, by seq.
+    private var speedTestWaiters: [Int: CheckedContinuation<TetherMessage, Error>] = [:]
+    private var speedTestSeq = 0
+
+    private static let speedTestChunkBytes = 512 * 1024
+    private static let speedTestUploadChunks = 4
+    private static let speedTestDownloadBytes = 2 * 1024 * 1024
+    private static let speedTestStepTimeout: Double = 20
+
+    // Measures the Wi-Fi session to the desktop: round trip, then upload and
+    // download of a few megabytes over the same TLS connection the clipboard
+    // uses. Rates are for the raw bytes, before base64.
+    func runSpeedTest() {
+        guard !speedTestRunning, case .connected = appState else { return }
+        speedTestRunning = true
+        speedTestError = nil
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                // Round trip: three empty exchanges, the median.
+                var trips: [Double] = []
+                for _ in 0..<3 {
+                    let start = Date()
+                    _ = try await speedTestExchange(.speedTestDownload(seq: nextSpeedTestSeq(), bytes: 0))
+                    trips.append(Date().timeIntervalSince(start) * 1000)
+                }
+                let roundTrip = trips.sorted()[1]
+
+                // Upload.
+                var chunk = Data(count: Self.speedTestChunkBytes)
+                chunk.withUnsafeMutableBytes { buffer in
+                    _ = SecRandomCopyBytes(kSecRandomDefault, buffer.count, buffer.baseAddress!)
+                }
+                let uploadStart = Date()
+                for _ in 0..<Self.speedTestUploadChunks {
+                    _ = try await speedTestExchange(.speedTestUpload(seq: nextSpeedTestSeq(), data: chunk))
+                }
+                let uploadSeconds = Date().timeIntervalSince(uploadStart)
+                let uploadBytes = Double(Self.speedTestChunkBytes * Self.speedTestUploadChunks)
+
+                // Download.
+                let downloadStart = Date()
+                let reply = try await speedTestExchange(.speedTestDownload(seq: nextSpeedTestSeq(), bytes: Self.speedTestDownloadBytes))
+                let downloadSeconds = Date().timeIntervalSince(downloadStart)
+                let downloadBytes = Double(Data(base64Encoded: reply.data ?? "")?.count ?? 0)
+
+                speedTestResult = SpeedTestResult(
+                    roundTripMilliseconds: roundTrip,
+                    uploadMegabitsPerSecond: uploadBytes * 8 / max(uploadSeconds, 0.001) / 1_000_000,
+                    downloadMegabitsPerSecond: downloadBytes * 8 / max(downloadSeconds, 0.001) / 1_000_000,
+                    measuredAt: Date()
+                )
+            } catch {
+                speedTestError = error.localizedDescription
+            }
+            speedTestRunning = false
+        }
+    }
+
+    private func nextSpeedTestSeq() -> Int {
+        speedTestSeq += 1
+        return speedTestSeq
+    }
+
+    // Sends one speed test message and waits for the reply with the same seq.
+    private func speedTestExchange(_ message: TetherMessage) async throws -> TetherMessage {
+        let seq = message.seq ?? 0
+        return try await withCheckedThrowingContinuation { continuation in
+            speedTestWaiters[seq] = continuation
+            connection.send(message)
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(Self.speedTestStepTimeout))
+                guard let self, let waiting = speedTestWaiters.removeValue(forKey: seq) else { return }
+                waiting.resume(throwing: SpeedTestError.timeout)
+            }
+        }
+    }
+
+    private func resolveSpeedTest(_ message: TetherMessage) {
+        guard let seq = message.seq, let waiting = speedTestWaiters.removeValue(forKey: seq) else { return }
+        waiting.resume(returning: message)
+    }
+
+    enum SpeedTestError: LocalizedError {
+        case timeout
+        var errorDescription: String? { "The desktop did not answer in time." }
+    }
+
     // Whether a desktop copy arriving in the background shows a notification.
     var notifyOnDesktopCopy: Bool {
         get { DesktopClipboardService.shared.notifyOnDesktopCopy }
@@ -120,8 +196,9 @@ final class TetherViewModel {
     // would save a sent image to Downloads instead of the clipboard.
     private(set) var daemonSupportsClipboardImages = false
 
-    // Clipboard history (most recent first).
-    private(set) var clipboardHistory: [ClipboardEntry] = []
+    // Clipboard history (most recent first), kept on disk by the store.
+    let history = ClipboardHistoryStore.shared
+    var clipboardHistory: [ClipboardEntry] { history.entries }
 
     // Active file transfers.
     private(set) var activeTransfers: [FileTransfer] = []
@@ -256,11 +333,7 @@ final class TetherViewModel {
         lastRemoteClipboardText = text
 
         let sourceName = connectedDeviceName ?? DesktopClipboardService.shared.deviceName?() ?? "Desktop"
-        let entry = ClipboardEntry(content: text, timestamp: Date(), source: .remote(sourceName))
-        clipboardHistory.insert(entry, at: 0)
-        if clipboardHistory.count > 50 {
-            clipboardHistory = Array(clipboardHistory.prefix(50))
-        }
+        history.addText(text, source: .remote(sourceName))
         return true
     }
 
@@ -386,14 +459,16 @@ final class TetherViewModel {
         #endif
 
         connection.send(.clipboardSet(text))
+        history.addText(text, source: .local(certificateManager.localDeviceName))
+    }
 
-        let localName = certificateManager.localDeviceName
-        let entry = ClipboardEntry(content: text, timestamp: Date(), source: .local(localName))
-        clipboardHistory.insert(entry, at: 0)
-
-        // Keep the history manageable
-        if clipboardHistory.count > 50 {
-            clipboardHistory = Array(clipboardHistory.prefix(50))
+    // Sends an entry from the history to the desktop clipboard.
+    func sendToDesktop(_ entry: ClipboardEntry) {
+        if entry.isImage {
+            guard let png = history.imageData(for: entry) else { return }
+            sendClipboardImage(png)
+        } else {
+            connection.send(.clipboardSet(entry.content))
         }
     }
 
@@ -409,13 +484,7 @@ final class TetherViewModel {
             return
         }
         sendFile(data: png, filename: "clipboard.png", clipboard: "set")
-
-        let size = ByteCountFormatter.string(fromByteCount: Int64(png.count), countStyle: .file)
-        let entry = ClipboardEntry(content: "Image, \(size)", timestamp: Date(), source: .local(certificateManager.localDeviceName), image: png)
-        clipboardHistory.insert(entry, at: 0)
-        if clipboardHistory.count > 50 {
-            clipboardHistory = Array(clipboardHistory.prefix(50))
-        }
+        history.addImage(png, source: .local(certificateManager.localDeviceName))
     }
 
     // Request the current clipboard from the daemon.
@@ -769,12 +838,14 @@ final class TetherViewModel {
                 applyDesktopClipboard(content)
             }
 
+        case .speedTestAck, .speedTestPayload:
+            resolveSpeedTest(message)
+
         case .clipboardContent:
             if let content = message.content {
                 let sourceName = connectedDeviceName ?? "Desktop"
-                let entry = ClipboardEntry(content: content, timestamp: Date(), source: .remote(sourceName))
-                clipboardHistory.insert(entry, at: 0)
-                
+                history.addText(content, source: .remote(sourceName))
+
                 // Manual requests ALWAYS write to the pasteboard
                 Task { @MainActor in
                     copyToLocalClipboard(content)
@@ -919,12 +990,7 @@ final class TetherViewModel {
                 return
             }
             let sourceName = connectedDeviceName ?? "Desktop"
-            let size = ByteCountFormatter.string(fromByteCount: buffered.expectedSize, countStyle: .file)
-            let entry = ClipboardEntry(content: "Image, \(size)", timestamp: Date(), source: .remote(sourceName), image: buffered.data)
-            clipboardHistory.insert(entry, at: 0)
-            if clipboardHistory.count > 50 {
-                clipboardHistory = Array(clipboardHistory.prefix(50))
-            }
+            history.addImage(buffered.data, source: .remote(sourceName))
             // "content" answers a manual request, so it always writes, like clipboard_content.
             if kind == "content" || autoSyncClipboard {
                 Task { @MainActor in
@@ -991,12 +1057,10 @@ extension TetherViewModel {
         vm.appState = .connected
         vm.connectedDeviceName = "Arch btw Linux"
         
-        vm.clipboardHistory = [
-            ClipboardEntry(content: "https://developer.apple.com/app-store/connect/", timestamp: Date(), source: .remote(vm.connectedDeviceName!)),
-            ClipboardEntry(content: "func buildAwesomeApp() async throws -> Success", timestamp: Date().addingTimeInterval(-300), source: .local("iPhone")),
-            ClipboardEntry(content: "Meeting notes:\n- Review App Store designs\n- Approve new icon\n- Push v1.0", timestamp: Date().addingTimeInterval(-3600), source: .remote(vm.connectedDeviceName!)),
-            ClipboardEntry(content: "9A1B-2C3D-4E5F-6G7H", timestamp: Date().addingTimeInterval(-86400), source: .local("iPhone"))
-        ]
+        vm.history.addText("9A1B-2C3D-4E5F-6G7H", source: .local("iPhone"))
+        vm.history.addText("Meeting notes:\n- Review App Store designs\n- Approve new icon\n- Push v1.0", source: .remote(vm.connectedDeviceName!))
+        vm.history.addText("func buildAwesomeApp() async throws -> Success", source: .local("iPhone"))
+        vm.history.addText("https://developer.apple.com/app-store/connect/", source: .remote(vm.connectedDeviceName!))
         
         vm.activeTransfers = [
             FileTransfer(id: "1", filename: "App_Store_Assets.zip", totalSize: 24_500_000, direction: .outgoing, bytesTransferred: 18_200_000, isComplete: false)
