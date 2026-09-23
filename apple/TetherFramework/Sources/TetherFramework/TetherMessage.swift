@@ -55,6 +55,8 @@ public struct TetherMessage: Codable, Sendable {
 
     // Clipboard
     public var content: String?
+    // clipboard_content: when the desktop clipboard last changed, ms since the epoch.
+    public var changedAt: Int64?
 
     // File transfer
     public var filename: String?
@@ -81,6 +83,7 @@ public struct TetherMessage: Codable, Sendable {
 
     public enum CodingKeys: String, CodingKey {
         case command, content, filename, size
+        case changedAt = "changed_at"
         case transferId = "transfer_id"
         case chunkIndex = "chunk_index"
         case data, clipboard, features
