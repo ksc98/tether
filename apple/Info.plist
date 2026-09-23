@@ -4,6 +4,8 @@
 <dict>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Used to receive clipboard changes from your desktop while Tether is in the background.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_tether._tcp</string>
@@ -12,6 +14,10 @@
 	<string>Used to discover and connect to Tether services on your local network.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Used to send photos from your library to your desktop.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 </dict>
