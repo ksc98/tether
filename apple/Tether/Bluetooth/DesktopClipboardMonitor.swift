@@ -174,7 +174,10 @@ final class DesktopClipboardMonitor: NSObject {
         }
 
         let lastSeq = UInt64(UserDefaults.standard.integer(forKey: Self.lastSeqKey))
-        guard payload.seq > lastSeq || lastSeq == 0 else { return }
+        guard payload.seq > lastSeq || lastSeq == 0 else {
+            note("write: seq \(payload.seq) not above \(lastSeq), ignored")
+            return
+        }
         UserDefaults.standard.set(Int(payload.seq), forKey: Self.lastSeqKey)
 
         if payload.text.utf8.count >= payload.len {
