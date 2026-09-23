@@ -211,13 +211,15 @@ swipe to delete, and a context menu (Copy, Send to Desktop, Share, Delete).
 
 ## Speed test
 
-The Dashboard's Speed Test card measures the Wi-Fi session: three empty
-`speed_test` exchanges for the round trip (median), four 512 KiB uploads
-(`speed_test` with `data`, answered by `speed_test_ack` with the byte count),
-and one 2 MiB download (`speed_test` with `bytes`, answered by
-`speed_test_payload`). Rates are for raw bytes before base64, over the same
-TLS connection the clipboard uses. The daemon caps a download at 8 MiB and
-stores nothing.
+The Dashboard's Speed Test card measures the Wi-Fi session over about ten
+seconds: five empty `speed_test` exchanges for the round trip (median), then
+four seconds of continuous 512 KiB uploads (`speed_test` with `data`,
+answered by `speed_test_ack` with the byte count) and four seconds of
+continuous 1 MiB downloads (`speed_test` with `bytes`, answered by
+`speed_test_payload`), three messages in flight at a time. Rates are for raw
+bytes before base64, over the same TLS connection the clipboard uses, and
+the card shows the live rate while a phase runs. The daemon caps a download
+at 8 MiB and stores nothing.
 
 ## Related: Shortcuts actions
 

@@ -86,7 +86,18 @@ final class TetherViewModel {
         let measuredAt: Date
     }
 
+    enum SpeedTestPhase: String {
+        case ping = "Ping"
+        case upload = "Upload"
+        case download = "Download"
+    }
+
     private(set) var speedTestRunning = false
+    private(set) var speedTestPhase: SpeedTestPhase?
+    // 0...1 across the whole run.
+    private(set) var speedTestProgress: Double = 0
+    // The rate of the phase in progress, Mb/s, refreshed as data moves.
+    private(set) var speedTestLiveRate: Double = 0
     private(set) var speedTestResult: SpeedTestResult?
     private(set) var speedTestError: String?
 
@@ -95,59 +106,101 @@ final class TetherViewModel {
     private var speedTestSeq = 0
 
     private static let speedTestChunkBytes = 512 * 1024
-    private static let speedTestUploadChunks = 4
-    private static let speedTestDownloadBytes = 2 * 1024 * 1024
+    private static let speedTestDownloadBytes = 1024 * 1024
+    // Messages kept in flight during a transfer phase, so the link stays busy.
+    private static let speedTestInFlight = 3
+    private static let speedTestPings = 5
+    private static let speedTestPhaseSeconds: Double = 4
     private static let speedTestStepTimeout: Double = 20
 
-    // Measures the Wi-Fi session to the desktop: round trip, then upload and
-    // download of a few megabytes over the same TLS connection the clipboard
-    // uses. Rates are for the raw bytes, before base64.
+    // Measures the Wi-Fi session to the desktop over the same TLS connection
+    // the clipboard uses: a second of round trips, then four seconds each of
+    // continuous upload and download. Rates are for the raw bytes, before base64.
     func runSpeedTest() {
         guard !speedTestRunning, case .connected = appState else { return }
         speedTestRunning = true
         speedTestError = nil
+        speedTestProgress = 0
+        speedTestLiveRate = 0
 
         Task { [weak self] in
             guard let self else { return }
             do {
-                // Round trip: three empty exchanges, the median.
+                // Round trip: the median of a few empty exchanges.
+                speedTestPhase = .ping
                 var trips: [Double] = []
-                for _ in 0..<3 {
+                for i in 0..<Self.speedTestPings {
                     let start = Date()
                     _ = try await speedTestExchange(.speedTestDownload(seq: nextSpeedTestSeq(), bytes: 0))
                     trips.append(Date().timeIntervalSince(start) * 1000)
+                    speedTestProgress = 0.1 * Double(i + 1) / Double(Self.speedTestPings)
                 }
-                let roundTrip = trips.sorted()[1]
+                let roundTrip = trips.sorted()[trips.count / 2]
 
-                // Upload.
+                // Upload: keep a few chunks in flight until the phase is up.
+                speedTestPhase = .upload
+                speedTestLiveRate = 0
                 var chunk = Data(count: Self.speedTestChunkBytes)
                 chunk.withUnsafeMutableBytes { buffer in
                     _ = SecRandomCopyBytes(kSecRandomDefault, buffer.count, buffer.baseAddress!)
                 }
-                let uploadStart = Date()
-                for _ in 0..<Self.speedTestUploadChunks {
-                    _ = try await speedTestExchange(.speedTestUpload(seq: nextSpeedTestSeq(), data: chunk))
+                let upload = try await speedTestPhase(progressFrom: 0.1) { [self] in
+                    _ = try await self.speedTestExchange(.speedTestUpload(seq: self.nextSpeedTestSeq(), data: chunk))
+                    return Self.speedTestChunkBytes
                 }
-                let uploadSeconds = Date().timeIntervalSince(uploadStart)
-                let uploadBytes = Double(Self.speedTestChunkBytes * Self.speedTestUploadChunks)
 
-                // Download.
-                let downloadStart = Date()
-                let reply = try await speedTestExchange(.speedTestDownload(seq: nextSpeedTestSeq(), bytes: Self.speedTestDownloadBytes))
-                let downloadSeconds = Date().timeIntervalSince(downloadStart)
-                let downloadBytes = Double(Data(base64Encoded: reply.data ?? "")?.count ?? 0)
+                // Download: same shape, the daemon sends the bytes.
+                speedTestPhase = .download
+                speedTestLiveRate = 0
+                let download = try await speedTestPhase(progressFrom: 0.55) { [self] in
+                    let reply = try await self.speedTestExchange(
+                        .speedTestDownload(seq: self.nextSpeedTestSeq(), bytes: Self.speedTestDownloadBytes))
+                    return Data(base64Encoded: reply.data ?? "")?.count ?? 0
+                }
 
+                speedTestProgress = 1
                 speedTestResult = SpeedTestResult(
                     roundTripMilliseconds: roundTrip,
-                    uploadMegabitsPerSecond: uploadBytes * 8 / max(uploadSeconds, 0.001) / 1_000_000,
-                    downloadMegabitsPerSecond: downloadBytes * 8 / max(downloadSeconds, 0.001) / 1_000_000,
+                    uploadMegabitsPerSecond: upload,
+                    downloadMegabitsPerSecond: download,
                     measuredAt: Date()
                 )
             } catch {
                 speedTestError = error.localizedDescription
             }
+            speedTestPhase = nil
             speedTestRunning = false
         }
+    }
+
+    // Runs `transfer` with a few in flight for one phase's duration and returns
+    // the rate in Mb/s. Each transfer returns the raw bytes it moved.
+    private func speedTestPhase(progressFrom base: Double,
+                                transfer: @escaping @MainActor () async throws -> Int) async throws -> Double {
+        let start = Date()
+        var bytes = 0
+        var elapsed: Double { Date().timeIntervalSince(start) }
+
+        try await withThrowingTaskGroup(of: Int.self) { group in
+            var inFlight = 0
+            for _ in 0..<Self.speedTestInFlight {
+                group.addTask { try await transfer() }
+                inFlight += 1
+            }
+            while let moved = try await group.next() {
+                inFlight -= 1
+                bytes += moved
+                let seconds = max(elapsed, 0.001)
+                speedTestLiveRate = Double(bytes) * 8 / seconds / 1_000_000
+                speedTestProgress = base + 0.45 * min(seconds / Self.speedTestPhaseSeconds, 1)
+                if elapsed < Self.speedTestPhaseSeconds {
+                    group.addTask { try await transfer() }
+                    inFlight += 1
+                }
+            }
+        }
+
+        return Double(bytes) * 8 / max(elapsed, 0.001) / 1_000_000
     }
 
     private func nextSpeedTestSeq() -> Int {

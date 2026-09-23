@@ -154,7 +154,11 @@ struct DashboardView: View {
                     .font(.headline)
                     .foregroundStyle(.secondary)
                 Spacer()
-                if let result = viewModel.speedTestResult {
+                if let phase = viewModel.speedTestPhase {
+                    Text(phase.rawValue)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                } else if let result = viewModel.speedTestResult {
                     Text(result.measuredAt, style: .relative)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -162,7 +166,18 @@ struct DashboardView: View {
             }
 
             HStack(spacing: 12) {
-                if let result = viewModel.speedTestResult {
+                if viewModel.speedTestRunning {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ProgressView(value: viewModel.speedTestProgress)
+                            .tint(.teal)
+                        Text(viewModel.speedTestPhase == .ping
+                             ? "Measuring round trip…"
+                             : String(format: "%.0f Mb/s", viewModel.speedTestLiveRate))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let result = viewModel.speedTestResult {
                     speedTestStat(title: "Ping", value: String(format: "%.0f", result.roundTripMilliseconds), unit: "ms")
                     speedTestStat(title: "Up", value: String(format: "%.0f", result.uploadMegabitsPerSecond), unit: "Mb/s")
                     speedTestStat(title: "Down", value: String(format: "%.0f", result.downloadMegabitsPerSecond), unit: "Mb/s")
@@ -172,7 +187,7 @@ struct DashboardView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    Text("Measures the Wi-Fi link to the desktop.")
+                    Text("Measures the Wi-Fi link to the desktop, about ten seconds.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
