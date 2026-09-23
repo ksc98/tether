@@ -9,6 +9,7 @@ import SwiftUI
 
 @main
 struct TetherApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var viewModel = TetherViewModel()
     @Environment(\.scenePhase) private var scenePhase
 
