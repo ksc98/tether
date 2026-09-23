@@ -62,3 +62,27 @@ jobs:
           name: Tether-ipa
           path: ${{ runner.temp }}/Tether.ipa
           if-no-files-found: error
+
+      # iOS imports only signed shortcut files, and signing needs macOS. The
+      # identifiers are the sideloaded app's: xtool re-signs the bundle as
+      # XTL-<id>.<bundle> under the personal team.
+      - name: Build and sign the Sync Clipboard shortcut
+        env:
+          BUNDLE_ID: XTL-E8FE8F29.net.jeedup.Tether
+          TEAM_ID: 2DRNAXC5AQ
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/shortcut"
+          python3 apple/shortcuts/make_sync_shortcut.py \
+            --bundle-id "$BUNDLE_ID" --team-id "$TEAM_ID" \
+            -o "$RUNNER_TEMP/shortcut/Sync Clipboard.unsigned.shortcut"
+          shortcuts sign --mode anyone \
+            --input "$RUNNER_TEMP/shortcut/Sync Clipboard.unsigned.shortcut" \
+            --output "$RUNNER_TEMP/shortcut/Sync Clipboard.shortcut"
+          ls -la "$RUNNER_TEMP/shortcut"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sync-Clipboard-shortcut
+          path: ${{ runner.temp }}/shortcut/Sync Clipboard.shortcut
+          if-no-files-found: error

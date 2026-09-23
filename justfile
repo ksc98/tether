@@ -35,3 +35,17 @@ install:
     # A client respawns tetherd on demand; the old one keeps the old code until it exits.
     pkill -f '^tetherd' || true
     tether status >/dev/null 2>&1 || true
+
+# Send the CI-signed "Sync Clipboard" shortcut to the phone over Tether's file
+# transfer. The app has to be open and connected over Wi-Fi. On the phone, open
+# the file from the Files tab and Shortcuts imports it.
+ios-shortcut branch="kyle":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    run=$(gh run list --repo ksc98/tether --workflow ios-sideload.yml --branch {{branch}} \
+        --status success --limit 1 --json databaseId -q '.[0].databaseId')
+    [ -n "$run" ] || { echo "no successful ios-sideload run on {{branch}}" >&2; exit 1; }
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    gh run download "$run" --repo ksc98/tether -n Sync-Clipboard-shortcut -D "$dir"
+    tether send "$dir/Sync Clipboard.shortcut"
