@@ -26,6 +26,8 @@ namespace tether::bluetooth {
         std::condition_variable wake;
         std::vector<guint8> pending;
         bool has_pending = false;
+        // Bumped on every update, so the writer can tell a fresh value from the one it holds.
+        uint64_t generation = 0;
         bool stopping = false;
         uint64_t seq = 0;
 
@@ -168,6 +170,10 @@ namespace tether::bluetooth {
             return {};
         }
 
+        // A burst of copies (select, copy, select, copy) becomes one write: the
+        // value goes out once the clipboard has been quiet this long.
+        constexpr auto QUIET_PERIOD = std::chrono::seconds(2);
+
         void writer_loop(ClipboardGattState* state) {
             for (;;) {
                 std::vector<guint8> value;
@@ -176,6 +182,16 @@ namespace tether::bluetooth {
                     state->wake.wait(lock, [state] { return state->has_pending || state->stopping; });
                     if (state->stopping)
                         return;
+                    // Keep waiting while newer values keep arriving.
+                    for (;;) {
+                        const uint64_t held = state->generation;
+                        const bool fresh = state->wake.wait_for(
+                            lock, QUIET_PERIOD, [state, held] { return state->generation != held || state->stopping; });
+                        if (state->stopping)
+                            return;
+                        if (!fresh)
+                            break;
+                    }
                     value = std::move(state->pending);
                     state->pending.clear();
                     state->has_pending = false;
@@ -267,6 +283,7 @@ namespace tether::bluetooth {
                 return;
             state->pending = encode_value(state->seq, text);
             state->has_pending = true;
+            state->generation += 1;
         }
         state->wake.notify_one();
     }
