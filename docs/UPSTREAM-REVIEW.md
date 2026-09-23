@@ -106,7 +106,11 @@ Desktop-side only.
 - `shortcuts-clipboard-intents`: the two App Intents, one commit on
   `upstream/main`.
 - `bluetooth-clipboard`: the Bluetooth push, on top of the intents branch
-  (it reuses `ShareSender.fetchClipboard`). Daemon, app, spec.
+  (it reuses `ShareSender.fetchClipboard`). Daemon, app, spec, Sync Clipboard.
+- `clipboard-get-stale-text`: one daemon fix, `clipboard_get` behind an image.
+- `intent-endpoint-port`: one app fix, the stored daemon address after an
+  inbound session carried the daemon's ephemeral dial port, so the Share
+  Extension and the intents dialled a closed port.
 - `kyle`: everything above plus fork-only tooling (CI workflow, justfile,
   sideload entitlements, these docs). Never sent upstream as is.
 
