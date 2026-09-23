@@ -81,6 +81,11 @@ never reaches CI:
 Capture the build output in a variable and test for `Build complete` before
 committing. A pipeline into `head` hides the compiler's exit status.
 
+The harness strips `#Preview` blocks, so they are the one thing it does not
+check. Keep them trivial (`TetherViewModel()`, no DEBUG-only helpers): the CI
+build is Release, and a preview that references a `#if DEBUG` symbol fails
+there.
+
 ### Local xtool build (unfinished)
 
 `apple/DevBuild/` is a SwiftPM package that xtool can build into an `.app`
