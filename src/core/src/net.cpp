@@ -1492,6 +1492,10 @@ namespace tether {
                         std::string content = j["content"];
                         if (g_wayland)
                             g_wayland->copy_to_clipboard(content);
+                        // copy_to_clipboard primes the Wayland cache, so the change callback
+                        // stays quiet; a local set still has to reach the phone.
+                        if (bluetooth::g_clipboard_gatt)
+                            bluetooth::g_clipboard_gatt->update(content);
                     } else if (j.contains("command") && j["command"] == "clipboard_get") {
                         if (g_wayland) {
                             nlohmann::json resp;
@@ -2164,6 +2168,9 @@ namespace tether {
                         std::string content = j["content"];
                         if (g_wayland)
                             g_wayland->copy_to_clipboard(content);
+                        // The phone set this; keep the GATT value current without waking it.
+                        if (bluetooth::g_clipboard_gatt)
+                            bluetooth::g_clipboard_gatt->update(content, false);
                         // Broadcast to everyone (including sender) to ensure robust transport
                         nlohmann::json bc;
                         bc["command"] = "clipboard_updated";
