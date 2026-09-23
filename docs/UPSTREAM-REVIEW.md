@@ -15,7 +15,11 @@ not taken, reason given).
 Read in full: `248b958`, `620a631`, `eb60a58`, `afcb136`, `24c3d9d`,
 `dee9bea`, `c7387cf`. Version bumps, merges and the flatpak doc change were
 skimmed. Upstream's test suite (`ctest`, debug preset) was run on the rebased
-tree.
+tree: 7 failures (`DiscoveryTest.StateCallbackReportsOnlyChanges`, four
+`HeadlessRuntime.*`, two `DialogRejection.*`), identical on a pristine
+`upstream/main` worktree on the same machine, so they are environmental
+(this shell has no Wayland session and no dialog binary), not from the
+rebase.
 
 ### `248b958` feat: image clipboard transfer — absorb, with fix
 
