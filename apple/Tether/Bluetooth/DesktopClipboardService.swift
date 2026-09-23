@@ -77,7 +77,7 @@ final class DesktopClipboardService: NSObject {
 
     // The desktop's name for the notification title, from the view model when
     // a view exists, else from the pairing store.
-    private func desktopName() -> String {
+    func desktopName() -> String {
         if let name = deviceName?() { return name }
         let certificates = CertificateManager()
         certificates.initialize()
@@ -86,6 +86,13 @@ final class DesktopClipboardService: NSObject {
             return name
         }
         return "Desktop"
+    }
+
+    // This phone's name as the pairing store has it.
+    func phoneName() -> String {
+        let certificates = CertificateManager()
+        certificates.initialize()
+        return certificates.localDeviceName
     }
 
     // From the app delegate, at every launch.
@@ -120,6 +127,7 @@ final class DesktopClipboardService: NSObject {
     private func deliver(_ update: DesktopClipboardUpdate) {
         // Always kept, so the Sync Clipboard shortcut can pull it without Wi-Fi.
         DesktopClipboardCache.store(update)
+        ClipboardHistoryStore.shared.addText(update.text, source: .remote(desktopName()))
 
         let state = UIApplication.shared.applicationState
         monitor.noteExternal("deliver: app state \(state.rawValue), view model \(applyClipboard == nil ? "absent" : "attached")")

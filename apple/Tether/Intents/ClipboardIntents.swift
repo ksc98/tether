@@ -132,6 +132,7 @@ struct SyncClipboardIntent: AppIntent {
         if desktopChanged, !desktop.text.isEmpty, desktop.text != text {
             remember(desktop.text)
             await service.clearNotification()
+            await ClipboardHistoryStore.shared.addText(desktop.text, source: .remote(service.desktopName()))
             await service.monitor.noteExternal("sync: pulled \(desktop.text.count) chars")
             return .result(value: desktop.text)
         }
@@ -140,6 +141,7 @@ struct SyncClipboardIntent: AppIntent {
             switch await ShareSender.send(.clipboard(text)) {
             case .success:
                 remember(text)
+                await ClipboardHistoryStore.shared.addText(text, source: .local(service.phoneName()))
                 await service.monitor.noteExternal("sync: sent \(text.count) chars")
                 return .result(value: text)
             case .failure(let error):

@@ -2,111 +2,116 @@
 //  ClipboardView.swift
 //  Tether
 //
-//  Clipboard sync interface: send/receive buttons, clipboard history.
+//  Clipboard history: text and images from both sides, kept on disk. Tap an
+//  entry to put it on this iPhone's clipboard; the context menu sends it to
+//  the desktop, shares it or removes it. Send / Get need the Wi-Fi session.
 //
 
 import SwiftUI
 
 struct ClipboardView: View {
     @Environment(TetherViewModel.self) private var viewModel
+    @State private var query = ""
+    @State private var confirmClear = false
+
+    private var entries: [ClipboardEntry] {
+        let all = viewModel.clipboardHistory
+        let needle = query.trimmingCharacters(in: .whitespaces)
+        guard !needle.isEmpty else { return all }
+        return all.filter { $0.content.localizedCaseInsensitiveContains(needle) }
+    }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if viewModel.appState != .connected {
-                    notConnectedView
-                } else {
-                    connectedView
-                }
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Clipboard")
-        }
-    }
+            List {
+                if viewModel.appState == .connected {
+                    Section {
+                        HStack(spacing: 12) {
+                            clipboardActionButton(
+                                title: "Send to Desktop",
+                                subtitle: "Copy iPhone clipboard",
+                                icon: "arrow.up.circle.fill",
+                                color: .teal
+                            ) {
+                                viewModel.sendClipboard()
+                            }
 
-    // MARK: - Not Connected
-
-    private var notConnectedView: some View {
-        VStack(spacing: 16) {
-            Spacer()
-
-            Image(systemName: "clipboard")
-                .font(.system(size: 48))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
-
-            Text("Connect to a device to sync clipboard")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - Connected
-
-    private var connectedView: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Action Buttons
-                HStack(spacing: 12) {
-                    clipboardActionButton(
-                        title: "Send to Desktop",
-                        subtitle: "Copy iPhone clipboard",
-                        icon: "arrow.up.circle.fill",
-                        color: .teal
-                    ) {
-                        viewModel.sendClipboard()
-                    }
-
-                    clipboardActionButton(
-                        title: "Get from Desktop",
-                        subtitle: "Fetch desktop clipboard",
-                        icon: "arrow.down.circle.fill",
-                        color: .indigo
-                    ) {
-                        viewModel.requestClipboard()
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.top, 4)
-
-                // History
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("History")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal)
-
-                    if viewModel.clipboardHistory.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "clock.arrow.circlepath")
-                                .font(.system(size: 32))
-                                .foregroundStyle(.tertiary)
-                                .accessibilityHidden(true)
-
-                            Text("No clipboard activity yet")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
-                    } else {
-                        LazyVStack(spacing: 8) {
-                            ForEach(viewModel.clipboardHistory) { entry in
-                                clipboardEntryRow(entry)
+                            clipboardActionButton(
+                                title: "Get from Desktop",
+                                subtitle: "Fetch desktop clipboard",
+                                icon: "arrow.down.circle.fill",
+                                color: .indigo
+                            ) {
+                                viewModel.requestClipboard()
                             }
                         }
-                        .padding(.horizontal)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    }
+                }
+
+                Section {
+                    if entries.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(entries) { entry in
+                            clipboardEntryRow(entry)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        viewModel.history.remove(entry)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                        }
+                    }
+                } header: {
+                    Text("History")
+                } footer: {
+                    if !viewModel.clipboardHistory.isEmpty {
+                        Text("Tap to copy. Swipe left to delete. Kept on this iPhone, \(ClipboardHistoryStore.maxEntries) entries at most.")
                     }
                 }
             }
-            .padding(.vertical)
+            .listStyle(.insetGrouped)
+            .searchable(text: $query, prompt: "Search history")
+            .navigationTitle("Clipboard")
+            .toolbar {
+                if !viewModel.clipboardHistory.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Clear", role: .destructive) {
+                            confirmClear = true
+                        }
+                    }
+                }
+            }
+            .confirmationDialog("Clear clipboard history?", isPresented: $confirmClear, titleVisibility: .visible) {
+                Button("Clear All", role: .destructive) {
+                    viewModel.history.clear()
+                }
+            } message: {
+                Text("Removes every entry and stored image from this iPhone.")
+            }
         }
     }
 
     // MARK: - Components
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: query.isEmpty ? "clock.arrow.circlepath" : "magnifyingglass")
+                .font(.system(size: 32))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+
+            Text(query.isEmpty ? "No clipboard activity yet" : "No matches")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .listRowBackground(Color.clear)
+    }
 
     private func clipboardActionButton(
         title: LocalizedStringKey,
@@ -139,13 +144,19 @@ struct ClipboardView: View {
         .buttonStyle(.plain)
     }
 
+    private func copy(_ entry: ClipboardEntry) {
+        if entry.isImage {
+            if let png = viewModel.history.imageData(for: entry) {
+                viewModel.copyImageToLocalClipboard(png)
+            }
+        } else {
+            viewModel.copyToLocalClipboard(entry.content)
+        }
+    }
+
     private func clipboardEntryRow(_ entry: ClipboardEntry) -> some View {
         Button {
-            if let image = entry.image {
-                viewModel.copyImageToLocalClipboard(image)
-            } else {
-                viewModel.copyToLocalClipboard(entry.content)
-            }
+            copy(entry)
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: entry.source.isRemote ? "desktopcomputer" : "iphone")
@@ -155,19 +166,25 @@ struct ClipboardView: View {
                     .padding(.top, 2)
                     .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    if let data = entry.image, let image = UIImage(data: data) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxHeight: 120)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .accessibilityLabel(entry.content)
+                VStack(alignment: .leading, spacing: 6) {
+                    if entry.isImage {
+                        if let image = viewModel.history.thumbnail(for: entry) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxHeight: 160)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .accessibilityLabel(entry.content)
+                        } else {
+                            Label(entry.content, systemImage: "photo")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     } else {
                         Text(entry.content)
                             .font(.subheadline)
                             .foregroundStyle(.primary)
-                            .lineLimit(3)
+                            .lineLimit(4)
                     }
 
                     HStack(spacing: 6) {
@@ -182,26 +199,64 @@ struct ClipboardView: View {
                         Text(entry.timestamp, style: .relative)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+
+                        if entry.isImage {
+                            Text("·")
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            Text(entry.content)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
-                Spacer()
-
-                Image(systemName: "doc.on.doc")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
+                Spacer(minLength: 0)
             }
-            .padding(14)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
         .accessibilityHint("Copies to this iPhone's clipboard")
+        .contextMenu {
+            Button {
+                copy(entry)
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+
+            if viewModel.appState == .connected {
+                Button {
+                    viewModel.sendToDesktop(entry)
+                } label: {
+                    Label("Send to Desktop", systemImage: "arrow.up.circle")
+                }
+            }
+
+            if entry.isImage {
+                if let png = viewModel.history.imageData(for: entry), let image = UIImage(data: png) {
+                    ShareLink(item: Image(uiImage: image), preview: SharePreview(entry.content, image: Image(uiImage: image))) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                    }
+                }
+            } else {
+                ShareLink(item: entry.content) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                viewModel.history.remove(entry)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
     }
 }
 
 #Preview {
     ClipboardView()
-        .environment(TetherViewModel())
+        .environment(TetherViewModel.previewMock)
         .preferredColorScheme(.dark)
 }
