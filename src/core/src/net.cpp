@@ -17,6 +17,7 @@
 
 #include "tether/base64.hpp"
 #include "tether/bluetooth/airpods.hpp"
+#include "tether/bluetooth/clipboard_gatt.hpp"
 #include "tether/bluetooth/config.hpp"
 #include "tether/bluetooth/connection.hpp"
 #include "tether/bluetooth/contacts.hpp"
@@ -1288,6 +1289,19 @@ namespace tether {
                             }
                             broadcast_local_event(event.dump());
                         }).detach();
+                    } else if (j.contains("command") && j["command"] == "bt_clipboard_advertise") {
+                        const int seconds = j.value("seconds", 60);
+                        std::thread([seconds]() {
+                            nlohmann::json event;
+                            event["command"] = "bt_clipboard_advertise_result";
+                            std::string err;
+                            event["success"] =
+                                bluetooth::g_clipboard_gatt && bluetooth::g_clipboard_gatt->advertise(seconds, err);
+                            event["message"] = event["success"]
+                                                   ? tr_format(_("Advertising the clipboard service for {} seconds."), seconds)
+                                                   : (err.empty() ? _("Bluetooth is unavailable.") : err);
+                            broadcast_local_event(event.dump());
+                        }).detach();
                     } else if (j.contains("command") && j["command"] == "bt_solicit") {
                         std::thread([]() {
                             nlohmann::json event;
@@ -2188,6 +2202,21 @@ namespace tether {
                             robust_ssl_write(ssl, payload.c_str(), payload.size());
                             continue;
                         }
+                    } else if (j.contains("command") && j["command"] == "bt_clipboard_advertise") {
+                        // The phone cannot see this machine's GATT service until it has found the
+                        // peripheral once; a short advertisement is what its scan needs.
+                        const int seconds = j.value("seconds", 60);
+                        std::thread([seconds]() {
+                            std::string err;
+                            if (bluetooth::g_clipboard_gatt)
+                                bluetooth::g_clipboard_gatt->advertise(seconds, err);
+                        }).detach();
+                        nlohmann::json resp;
+                        resp["command"] = "bt_clipboard_advertise_result";
+                        resp["success"] = bluetooth::g_clipboard_gatt != nullptr;
+                        std::string payload = resp.dump() + "\n";
+                        robust_ssl_write(ssl, payload.c_str(), payload.size());
+                        continue;
                     } else if (j.contains("command") && j["command"] == "new_otp" && j.contains("otp")) {
                         // OTP sent from a mobile client (iPhone Share Extension) over mTLS.
                         otp_publish(otp_from_json(j["otp"]), j.value("sender_domain", std::string{}));
