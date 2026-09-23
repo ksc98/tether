@@ -257,6 +257,6 @@ struct ClipboardView: View {
 
 #Preview {
     ClipboardView()
-        .environment(TetherViewModel.previewMock)
+        .environment(TetherViewModel())
         .preferredColorScheme(.dark)
 }
