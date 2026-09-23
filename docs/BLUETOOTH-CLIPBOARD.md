@@ -224,7 +224,10 @@ the side that can be known to be newer:
 
 The result is always the text the phone should hold, so the shortcut ends
 with *Copy to Clipboard* unconditionally, and the intent's dialog says which
-way it went. When both sides changed since the last sync the desktop wins,
+way it went. The shortcut is built by hand on the phone: iOS imports only
+`.shortcut` files signed by Apple's `shortcuts sign`, which runs on macOS
+only and needs an iCloud login, so neither Linux nor a CI runner can produce
+one, and no API lets an app install a shortcut. When both sides changed since the last sync the desktop wins,
 because its change is the one with a known time. State (last synced text,
 last desktop `changed_at`) lives in the app's `UserDefaults`.
 
