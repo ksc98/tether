@@ -548,6 +548,24 @@ namespace tether::bluetooth {
         job.done.wait(lock, [&job] { return job.finished; });
     }
 
+    void BluezMonitor::invoke_async(std::function<void()> fn) {
+        if (!impl_->context) {
+            fn();
+            return;
+        }
+        auto* job = new std::function<void()>(std::move(fn));
+        g_main_context_invoke_full(
+            impl_->context,
+            G_PRIORITY_DEFAULT,
+            [](gpointer data) -> gboolean {
+                auto* f = static_cast<std::function<void()>*>(data);
+                (*f)();
+                return G_SOURCE_REMOVE;
+            },
+            job,
+            [](gpointer data) { delete static_cast<std::function<void()>*>(data); });
+    }
+
     BluezObjects BluezMonitor::snapshot() const {
         std::lock_guard<std::mutex> lock(impl_->mutex);
         return impl_->objects;
