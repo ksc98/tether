@@ -1,14 +1,18 @@
 #include "notification.hpp"
+#include <atomic>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <string_view>
 #include <sys/timerfd.h>
+#include <thread>
 #include <tether/audio.hpp>
 #include <tether/bluetooth/airpods.hpp>
+#include <tether/bluetooth/clipboard_gatt.hpp>
 #include <tether/bluetooth/config.hpp>
 #include <tether/bluetooth/connection.hpp>
 #include <tether/bluetooth/contacts.hpp>
@@ -162,6 +166,10 @@ int main(int argc, char** argv) {
             // replace bad UTF-8 instead of throwing; a clipboard
             // app can still mislabel binary as text/plain. Don't abort the daemon.
             tether::broadcast_message(j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
+            // The phone's app is only on the Wi-Fi socket while open; the GATT
+            // subscription is what reaches it in the background.
+            if (tether::bluetooth::g_clipboard_gatt)
+                tether::bluetooth::g_clipboard_gatt->update(text);
         });
         wayland_srv.set_clipboard_image_callback(
             [](const std::string& png) { tether::broadcast_clipboard_image(png); });
@@ -608,18 +616,43 @@ int main(int argc, char** argv) {
     };
     airpods.set_enabled(bt_config.airpods_enabled);
 
+    std::unique_ptr<tether::bluetooth::ClipboardGattServer> clipboard_gatt;
+    // Registers the clipboard service once an adapter is up, and again after a
+    // bluetoothd restart. Off the loop thread: registration waits on BlueZ, and
+    // on the monitor thread, which a pairing dialog can hold for a while. Seeds
+    // the value with the current clipboard so the phone's first read after
+    // subscribing is not empty.
+    auto clipboard_gatt_registering = std::make_shared<std::atomic<bool>>(false);
+    const auto keep_clipboard_gatt_registered = [&clipboard_gatt, clipboard_gatt_registering] {
+        if (!clipboard_gatt || clipboard_gatt->registered())
+            return;
+        bool expected = false;
+        if (!clipboard_gatt_registering->compare_exchange_strong(expected, true))
+            return;
+        auto* gatt = clipboard_gatt.get();
+        std::thread([gatt, clipboard_gatt_registering] {
+            if (gatt->ensure_registered() && tether::g_wayland)
+                gatt->update(tether::g_wayland->get_clipboard());
+            clipboard_gatt_registering->store(false);
+        }).detach();
+    };
+
     if (bluez.start()) {
         tether::bluetooth::g_bluez = &bluez;
         tether::bluetooth::g_airpods = &airpods;
         tether::g_media = &media;
         media.watch(on_local_play);
-        loop.addFd(bluez.event_fd(), [&bluez, &follow_airpods](int) {
+        clipboard_gatt = std::make_unique<tether::bluetooth::ClipboardGattServer>(bluez);
+        tether::bluetooth::g_clipboard_gatt = clipboard_gatt.get();
+        loop.addFd(bluez.event_fd(), [&bluez, &follow_airpods, &keep_clipboard_gatt_registered](int) {
             bluez.drain();
             tether::broadcast_local_event(tether::build_bt_devices().dump());
             tether::broadcast_local_event(tether::build_bt_status().dump());
             follow_airpods();
+            keep_clipboard_gatt_registered();
         });
         follow_airpods();
+        keep_clipboard_gatt_registered();
         auto cap = bluez.capability();
         debug::log(INFO, "Bluetooth: {} mode", tether::bluetooth::to_string(cap.mode));
         for (const auto& reason : cap.reasons)
@@ -705,6 +738,8 @@ int main(int argc, char** argv) {
     // explicitly null globals to be safe during final stack unwinding
     tether::bluetooth::g_bt_connections = nullptr;
     connections.stop();
+    tether::bluetooth::g_clipboard_gatt = nullptr;
+    clipboard_gatt.reset();
     tether::bluetooth::g_bluez = nullptr;
     bluez.stop();
     tether::g_wayland = nullptr;
