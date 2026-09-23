@@ -39,6 +39,8 @@ namespace tether {
         void copy_image_to_clipboard(const std::string& png);
         std::string get_clipboard();
         std::string get_clipboard_image();
+        // When the clipboard last changed, in milliseconds since the epoch. 0 until it has.
+        int64_t clipboard_changed_at();
 
     private:
         bool connect_display();
@@ -49,6 +51,7 @@ namespace tether {
         std::mutex clip_mutex_;
         std::string cached_clipboard_;
         std::string cached_clipboard_image_;
+        int64_t clipboard_changed_at_ms_ = 0;
         EpollEventLoop& loop_;
         wl_display* raw_display_ = nullptr;
         std::string display_name_;

@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <poll.h>
@@ -21,6 +22,12 @@ namespace tether {
 
     namespace {
         std::atomic<bool> g_idle{false};
+
+        int64_t now_ms() {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::system_clock::now().time_since_epoch())
+                .count();
+        }
     } // namespace
 
     bool wayland_idle() { return g_idle; }
@@ -218,6 +225,10 @@ namespace tether {
             }
             if (!changed)
                 return;
+            {
+                std::lock_guard<std::mutex> lock(clip_mutex_);
+                clipboard_changed_at_ms_ = now_ms();
+            }
             if (is_image && clipboard_image_cb_) {
                 clipboard_image_cb_(data);
             } else if (!is_image && clipboard_cb_) {
@@ -269,6 +280,7 @@ namespace tether {
             std::lock_guard<std::mutex> lock(clip_mutex_);
             cached_clipboard_ = trimmed;
             cached_clipboard_image_.clear();
+            clipboard_changed_at_ms_ = now_ms();
         }
         if (clipboard_) {
             clipboard_->copy(text);
@@ -281,6 +293,7 @@ namespace tether {
             // cached first, so the compositor echoing our own selection is not rebroadcast
             std::lock_guard<std::mutex> lock(clip_mutex_);
             cached_clipboard_image_ = png;
+            clipboard_changed_at_ms_ = now_ms();
         }
         if (clipboard_) {
             clipboard_->copy_image(png);
@@ -296,6 +309,11 @@ namespace tether {
     std::string WaylandContext::get_clipboard_image() {
         std::lock_guard<std::mutex> lock(clip_mutex_);
         return cached_clipboard_image_;
+    }
+
+    int64_t WaylandContext::clipboard_changed_at() {
+        std::lock_guard<std::mutex> lock(clip_mutex_);
+        return clipboard_changed_at_ms_;
     }
 
 } // namespace tether
