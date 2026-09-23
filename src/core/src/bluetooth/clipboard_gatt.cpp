@@ -533,17 +533,16 @@ namespace tether::bluetooth {
         return true;
     }
 
-    void ClipboardGattServer::update(const std::string& text) {
+    void ClipboardGattServer::update(const std::string& text, bool notify) {
         auto* state = state_.get();
         if (!state->conn)
             return;
 
-        bool notify = false;
         {
             std::lock_guard<std::mutex> lock(state->mutex);
             state->seq += 1;
             state->value = encode_value(state->seq, text);
-            notify = state->notifying;
+            notify = notify && state->notifying;
         }
         if (!notify || !state->registered)
             return;

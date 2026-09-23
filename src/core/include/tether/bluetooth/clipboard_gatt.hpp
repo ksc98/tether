@@ -46,7 +46,9 @@ namespace tether::bluetooth {
 
         // Publishes a new clipboard value. Called from the network loop; the
         // D-Bus signal goes out on the monitor thread without waiting for it.
-        void update(const std::string& text);
+        // `notify` false refreshes what a later read returns without waking
+        // subscribers, for text a phone itself just set.
+        void update(const std::string& text, bool notify = true);
 
         // Advertises the clipboard service for `seconds` so a phone that has
         // never seen it can find this machine in a scan. Returns false with a
