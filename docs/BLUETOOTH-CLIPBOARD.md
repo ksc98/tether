@@ -222,6 +222,9 @@ the side that can be known to be newer:
    (`clipboard_set`). The phone text is returned.
 3. Otherwise nothing changes.
 
+The very first sync has no history, so the desktop would always look
+changed; that press pushes the phone's text instead.
+
 The result is always the text the phone should hold, so the shortcut ends
 with *Copy to Clipboard* unconditionally, and the intent's dialog says which
 way it went. The shortcut is built by hand on the phone: iOS imports only
