@@ -102,6 +102,12 @@ final class TetherViewModel {
     }
 
     private(set) var bluetoothClipboardStatus: DesktopClipboardMonitor.Status = .off
+
+    // Whether a desktop copy arriving in the background shows a notification.
+    var notifyOnDesktopCopy: Bool {
+        get { DesktopClipboardService.shared.notifyOnDesktopCopy }
+        set { DesktopClipboardService.shared.notifyOnDesktopCopy = newValue }
+    }
     private(set) var bluetoothClipboardTrace: [String] = []
 
     // Overall connection state.

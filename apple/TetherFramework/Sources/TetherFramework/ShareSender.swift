@@ -159,6 +159,11 @@ public actor ShareSender {
         // When it last changed on the desktop, ms since the epoch on the desktop's clock.
         // nil from a daemon that predates the field.
         public let changedAt: Int64?
+
+        public init(text: String, changedAt: Int64?) {
+            self.text = text
+            self.changedAt = changedAt
+        }
     }
 
     /// Fetch the desktop's current clipboard text from the paired tetherd daemon.

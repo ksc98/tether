@@ -22,6 +22,15 @@ final class DesktopClipboardService: NSObject {
     nonisolated static let copyAction = "TETHER_COPY"
     nonisolated private static let notificationIdentifier = "desktop-clipboard"
     nonisolated private static let textKey = "text"
+    nonisolated private static let notifyKey = "TetherNotifyOnDesktopCopy"
+
+    // Whether a desktop copy that arrives in the background shows a
+    // notification. Off by default: the Sync Clipboard shortcut pulls the
+    // stored copy on demand, so a notification per copy is noise.
+    var notifyOnDesktopCopy: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.notifyKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.notifyKey) }
+    }
 
     let monitor = DesktopClipboardMonitor()
 
@@ -109,13 +118,23 @@ final class DesktopClipboardService: NSObject {
     }
 
     private func deliver(_ update: DesktopClipboardUpdate) {
+        // Always kept, so the Sync Clipboard shortcut can pull it without Wi-Fi.
+        DesktopClipboardCache.store(update)
+
         let state = UIApplication.shared.applicationState
         monitor.noteExternal("deliver: app state \(state.rawValue), view model \(applyClipboard == nil ? "absent" : "attached")")
         if state == .active, let applyClipboard {
             applyClipboard(update.text)
             return
         }
-        post(update)
+        if notifyOnDesktopCopy {
+            post(update)
+        }
+    }
+
+    // Drops the notification for a copy the shortcut has since pulled.
+    func clearNotification() {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.notificationIdentifier])
     }
 
     private func post(_ update: DesktopClipboardUpdate) {
@@ -171,5 +190,33 @@ extension DesktopClipboardService: UNUserNotificationCenterDelegate {
                 pendingTapText = text
             }
         }
+    }
+}
+
+// The last desktop copy that arrived over Bluetooth. `seq` is the desktop's
+// clock in milliseconds at the copy, the same clock as `changed_at` in
+// `clipboard_content`, so the shortcut can compare the two directly.
+enum DesktopClipboardCache {
+    private static let textKey = "TetherDesktopCacheText"
+    private static let seqKey = "TetherDesktopCacheSeq"
+    private static let completeKey = "TetherDesktopCacheComplete"
+
+    struct Entry {
+        let text: String
+        let seq: Int64
+        let complete: Bool
+    }
+
+    static func store(_ update: DesktopClipboardUpdate) {
+        let defaults = UserDefaults.standard
+        defaults.set(update.text, forKey: textKey)
+        defaults.set(Int(update.seq), forKey: seqKey)
+        defaults.set(update.complete, forKey: completeKey)
+    }
+
+    static func load() -> Entry? {
+        let defaults = UserDefaults.standard
+        guard let text = defaults.string(forKey: textKey), defaults.object(forKey: seqKey) != nil else { return nil }
+        return Entry(text: text, seq: Int64(defaults.integer(forKey: seqKey)), complete: defaults.bool(forKey: completeKey))
     }
 }

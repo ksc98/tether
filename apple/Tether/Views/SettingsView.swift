@@ -179,6 +179,8 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
 
+                        Toggle("Notify on Desktop Copies", isOn: Bindable(viewModel).notifyOnDesktopCopy)
+
                         if !viewModel.bluetoothClipboardTrace.isEmpty {
                             DisclosureGroup("Log") {
                                 ForEach(Array(viewModel.bluetoothClipboardTrace.enumerated()), id: \.offset) { _, line in
@@ -193,7 +195,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Bluetooth Clipboard")
                 } footer: {
-                    Text("The desktop sends each copy over the Bluetooth link it keeps for notifications, and Tether receives it after you leave the app. A copy shows as a notification; tap Copy to put it on this iPhone's clipboard.")
+                    Text("The desktop sends each copy over the Bluetooth link it keeps for notifications, and Tether keeps it while in the background. The Sync Clipboard shortcut pulls it onto this iPhone's clipboard. Turn on notifications to also get a banner per copy, with a Copy action.")
                 }
 
                 // Connection
