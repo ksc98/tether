@@ -68,10 +68,11 @@ One write per desktop clipboard change. The value is UTF-8 JSON of at most
 {"seq": 17, "len": 1832, "text": "The first part of the clipboard…"}
 ```
 
-- `seq`: per-daemon counter, incremented on every clipboard change tetherd
-  sees, including ones it does not write. The phone ignores a value whose
-  `seq` is not greater than the last one it applied, so a redelivered or
-  reordered write cannot regress the clipboard.
+- `seq`: strictly increasing across daemon restarts: the larger of the
+  previous `seq` + 1 and the wall clock in milliseconds. The phone ignores a
+  value whose `seq` is not greater than the last one it applied (it remembers
+  that across its own relaunches), so a redelivered or reordered write cannot
+  regress the clipboard, and a restarted daemon is not mistaken for a replay.
 - `len`: byte length of the full clipboard text on the desktop.
 - `text`: the clipboard text, cut at a UTF-8 character boundary so that the
   whole document fits in 512 bytes. JSON escaping counts toward the limit.
