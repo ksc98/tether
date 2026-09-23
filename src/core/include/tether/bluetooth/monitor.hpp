@@ -56,6 +56,10 @@ namespace tether::bluetooth {
         // Runs fn on the watcher thread and waits for it to finish.
         void invoke_sync(const std::function<void()>& fn);
 
+        // Queues fn on the watcher thread and returns at once. For callers on
+        // the network loop that must not wait behind a pairing dialog.
+        void invoke_async(std::function<void()> fn);
+
     private:
         std::unique_ptr<MonitorState> impl_;
     };
