@@ -1,0 +1,7 @@
+version: 1
+bundleID: net.jeedup.Tether
+product: TetherApp
+infoPath: Info.plist
+entitlementsPath: ../Tether-sideload.entitlements
+resources:
+  - Metadata.appintents
