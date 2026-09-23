@@ -10,6 +10,7 @@
 //
 
 import Foundation
+import TetherFramework
 import UIKit
 import UserNotifications
 
@@ -24,19 +25,58 @@ final class DesktopClipboardService: NSObject {
 
     let monitor = DesktopClipboardMonitor()
 
-    // Set by the view model once it exists. Text applied while the app is in
-    // front, or copied from a notification, goes through it so the history and
-    // the auto-sync setting stay in one place.
+    // Set by the view model once a view exists. A background relaunch by
+    // CoreBluetooth never shows a view, so both may be nil when a write or a
+    // notification tap arrives; nothing here depends on them.
+    // In-front delivery: the view model records history and applies the
+    // auto-sync setting.
     var applyClipboard: ((String) -> Void)?
+    // A tapped notification: the view model records history. The pasteboard
+    // write is done here.
+    var noteTapped: ((String) -> Void)?
     var deviceName: (() -> String?)?
 
     private var notificationsReady = false
+
+    // Text from a tapped notification, waiting for the app to become active:
+    // iOS drops pasteboard writes made during the foreground transition.
+    private var pendingTapText: String?
 
     private override init() {
         super.init()
         monitor.onUpdate = { [weak self] update in
             self?.deliver(update)
         }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func applicationDidBecomeActive() {
+        guard let text = pendingTapText else { return }
+        pendingTapText = nil
+        writePasteboard(text)
+    }
+
+    private func writePasteboard(_ text: String) {
+        UIPasteboard.general.string = text
+        monitor.noteExternal("pasteboard set, \(text.count) chars")
+    }
+
+    // The desktop's name for the notification title, from the view model when
+    // a view exists, else from the pairing store.
+    private func desktopName() -> String {
+        if let name = deviceName?() { return name }
+        let certificates = CertificateManager()
+        certificates.initialize()
+        if let fingerprint = certificates.lastConnectedFingerprint,
+           let name = certificates.knownHosts[fingerprint] {
+            return name
+        }
+        return "Desktop"
     }
 
     // From the app delegate, at every launch.
@@ -69,8 +109,10 @@ final class DesktopClipboardService: NSObject {
     }
 
     private func deliver(_ update: DesktopClipboardUpdate) {
-        if UIApplication.shared.applicationState == .active {
-            applyClipboard?(update.text)
+        let state = UIApplication.shared.applicationState
+        monitor.noteExternal("deliver: app state \(state.rawValue), view model \(applyClipboard == nil ? "absent" : "attached")")
+        if state == .active, let applyClipboard {
+            applyClipboard(update.text)
             return
         }
         post(update)
@@ -80,7 +122,7 @@ final class DesktopClipboardService: NSObject {
         requestNotificationPermission()
 
         let content = UNMutableNotificationContent()
-        let name = deviceName?() ?? "Desktop"
+        let name = desktopName()
         content.title = update.complete ? "Copied on \(name)" : "Copied on \(name) (excerpt)"
         content.body = Self.preview(of: update.text)
         content.categoryIdentifier = Self.notificationCategory
@@ -120,8 +162,14 @@ extension DesktopClipboardService: UNUserNotificationCenterDelegate {
             // which is what makes the pasteboard writable.
             guard let text,
                   action == Self.copyAction || action == UNNotificationDefaultActionIdentifier else { return }
-            monitor.noteExternal("notification tapped, \(text.count) chars")
-            applyClipboard?(text)
+            let state = UIApplication.shared.applicationState
+            monitor.noteExternal("notification tapped, \(text.count) chars, app state \(state.rawValue)")
+            noteTapped?(text)
+            if state == .active {
+                writePasteboard(text)
+            } else {
+                pendingTapText = text
+            }
         }
     }
 }

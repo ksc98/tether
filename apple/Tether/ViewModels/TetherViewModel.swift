@@ -162,9 +162,6 @@ final class TetherViewModel {
     // Last desktop text applied from any transport, so Wi-Fi and Bluetooth do not both apply it.
     private var lastRemoteClipboardText: String?
 
-    // Text waiting for the app to become active before it can go on the pasteboard.
-    private var pendingPasteboardText: String?
-
     // Consecutive failed reconnect attempts, used to space out the retries.
     private var reconnectAttempts = 0
 
@@ -214,7 +211,10 @@ final class TetherViewModel {
     private func setupDesktopClipboard() {
         let service = DesktopClipboardService.shared
         service.applyClipboard = { [weak self] text in
-            self?.applyDesktopClipboard(text, explicit: true)
+            self?.applyDesktopClipboard(text)
+        }
+        service.noteTapped = { [weak self] text in
+            self?.recordDesktopClipboard(text)
         }
         service.deviceName = { [weak self] in
             guard let self else { return nil }
@@ -232,12 +232,21 @@ final class TetherViewModel {
         bluetoothClipboardTrace = service.monitor.trace
     }
 
-    // Text the desktop copied, delivered over Bluetooth. `explicit` is a tap on
-    // the notification's Copy action, which writes regardless of the auto-sync
-    // setting; in-front delivery follows it like the Wi-Fi path does.
-    private func applyDesktopClipboard(_ text: String, explicit: Bool) {
-        // The Wi-Fi socket delivers the same change while connected.
-        if text == lastRemoteClipboardText, !explicit { return }
+    // Text the desktop copied, arriving while the app is in front (over Wi-Fi
+    // or Bluetooth). Recorded once, applied per the auto-sync setting.
+    private func applyDesktopClipboard(_ text: String) {
+        guard recordDesktopClipboard(text) else { return }
+        if autoSyncClipboard {
+            copyToLocalClipboard(text)
+        }
+    }
+
+    // Adds a desktop clipboard entry to the history. False when it is the same
+    // text as the last one, which happens when a change arrives over both
+    // Wi-Fi and Bluetooth.
+    @discardableResult
+    private func recordDesktopClipboard(_ text: String) -> Bool {
+        if text == lastRemoteClipboardText { return false }
         lastRemoteClipboardText = text
 
         let sourceName = connectedDeviceName ?? DesktopClipboardService.shared.deviceName?() ?? "Desktop"
@@ -246,14 +255,7 @@ final class TetherViewModel {
         if clipboardHistory.count > 50 {
             clipboardHistory = Array(clipboardHistory.prefix(50))
         }
-        guard explicit || autoSyncClipboard else { return }
-        // A notification tap arrives while the app is still coming to the
-        // front, and iOS drops pasteboard writes until it is active.
-        if UIApplication.shared.applicationState == .active {
-            copyToLocalClipboard(text)
-        } else {
-            pendingPasteboardText = text
-        }
+        return true
     }
 
 
@@ -284,10 +286,6 @@ final class TetherViewModel {
             reconnectAttempts = 0
             startServer()
             refreshDiscovery()
-            if let text = pendingPasteboardText {
-                pendingPasteboardText = nil
-                copyToLocalClipboard(text)
-            }
         case .background:
             pendingReconnectTask?.cancel()
             pendingReconnectTask = nil
@@ -759,7 +757,7 @@ final class TetherViewModel {
         switch message.parsedCommand {
         case .clipboardUpdated:
             if let content = message.content {
-                applyDesktopClipboard(content, explicit: false)
+                applyDesktopClipboard(content)
             }
 
         case .clipboardContent:
