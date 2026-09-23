@@ -106,6 +106,9 @@ If the fetch fails, the notification carries the excerpt and its title says so.
    the value, stores it as the pending value, and wakes the writer. A newer
    value replaces an older pending one. `update(text, false)` bumps `seq` and
    writes nothing: used for `clipboard_set` from the phone itself.
+   The writer sends only after the clipboard has been quiet for 2 seconds, so
+   a burst of copies becomes one write and one notification. The Wi-Fi
+   broadcast is not delayed.
 2. The writer finds the phone: the device whose address matches the
    supervised address in the Bluetooth config, else any device with an Apple
    modalias whose LE bearer is connected.
