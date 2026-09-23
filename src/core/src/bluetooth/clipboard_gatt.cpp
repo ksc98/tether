@@ -4,7 +4,9 @@
 #include "tether/bluetooth/objects.hpp"
 #include "tether/log.hpp"
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <gio/gio.h>
 #include <mutex>
@@ -254,7 +256,13 @@ namespace tether::bluetooth {
         auto* state = state_.get();
         {
             std::lock_guard<std::mutex> lock(state->mutex);
-            state->seq += 1;
+            // The phone drops a write whose seq is not above the last one it
+            // applied, and it remembers that across our restarts. Wall-clock
+            // milliseconds keep seq climbing across restarts too.
+            const auto now_ms = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+                    .count());
+            state->seq = std::max(state->seq + 1, now_ms);
             if (!push)
                 return;
             state->pending = encode_value(state->seq, text);
