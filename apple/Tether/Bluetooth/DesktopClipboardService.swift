@@ -120,6 +120,7 @@ extension DesktopClipboardService: UNUserNotificationCenterDelegate {
             // which is what makes the pasteboard writable.
             guard let text,
                   action == Self.copyAction || action == UNNotificationDefaultActionIdentifier else { return }
+            monitor.noteExternal("notification tapped, \(text.count) chars")
             applyClipboard?(text)
         }
     }

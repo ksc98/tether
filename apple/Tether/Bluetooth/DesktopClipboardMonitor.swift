@@ -73,6 +73,9 @@ final class DesktopClipboardMonitor: NSObject {
         return f
     }()
 
+    // For the service's own steps, so they show in the same log.
+    func noteExternal(_ line: String) { note(line) }
+
     private func note(_ line: String) {
         log.notice("\(line)")
         trace.append("\(Self.traceClock.string(from: Date())) \(line)")
