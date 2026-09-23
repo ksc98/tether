@@ -10,6 +10,7 @@ Upstream is `zackb/tether`. This file is the working manual for the fork.
   sideload entitlements, these docs). CI builds from here.
 - `shortcuts-clipboard-intents`: the upstreamable intents feature alone.
 - `bluetooth-clipboard`: the Bluetooth push on top of the intents branch.
+- `clipboard-get-stale-text`, `intent-endpoint-port`: one-commit upstream fixes.
 
 Each rebase onto upstream gets an entry in [UPSTREAM-REVIEW.md](UPSTREAM-REVIEW.md):
 what upstream added, whether it was read, and the verdict. The feature
