@@ -179,14 +179,24 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        if viewModel.bluetoothClipboardStatus == .unknownDesktop
-                            || viewModel.bluetoothClipboardStatus == .scanning {
+                        if viewModel.bluetoothClipboardStatus != .subscribed {
                             Button {
                                 viewModel.findDesktopOverBluetooth()
                             } label: {
                                 Label("Find Desktop", systemImage: "dot.radiowaves.left.and.right")
                             }
                             .disabled(viewModel.bluetoothClipboardStatus == .scanning)
+                        }
+
+                        if !viewModel.bluetoothClipboardTrace.isEmpty {
+                            DisclosureGroup("Log") {
+                                ForEach(Array(viewModel.bluetoothClipboardTrace.enumerated()), id: \.offset) { _, line in
+                                    Text(line)
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            }
                         }
                     }
                 } header: {

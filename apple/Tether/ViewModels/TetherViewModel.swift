@@ -102,6 +102,7 @@ final class TetherViewModel {
     }
 
     private(set) var bluetoothClipboardStatus: DesktopClipboardMonitor.Status = .off
+    private(set) var bluetoothClipboardTrace: [String] = []
 
     // Overall connection state.
     private(set) var appState: AppConnectionState = .disconnected
@@ -221,7 +222,11 @@ final class TetherViewModel {
         service.monitor.onStatusChange = { [weak self] status in
             self?.bluetoothClipboardStatus = status
         }
+        service.monitor.onTrace = { [weak self] lines in
+            self?.bluetoothClipboardTrace = lines
+        }
         bluetoothClipboardStatus = service.monitor.status
+        bluetoothClipboardTrace = service.monitor.trace
     }
 
     // Text the desktop copied, delivered over Bluetooth. `explicit` is a tap on
