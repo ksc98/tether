@@ -74,7 +74,7 @@ final class DesktopClipboardMonitor: NSObject {
     }()
 
     private func note(_ line: String) {
-        note("\(line, privacy: .public)")
+        log.notice("\(line)")
         trace.append("\(Self.traceClock.string(from: Date())) \(line)")
         if trace.count > Self.traceLimit {
             trace.removeFirst(trace.count - Self.traceLimit)
