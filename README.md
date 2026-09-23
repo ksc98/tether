@@ -38,7 +38,7 @@
 ### Clipboard Sync
 Text copied on your Linux desktop appears instantly on your iPhone, and vice versa.
 
-With the app in the background, desktop copies still arrive: the app serves a clipboard characteristic over Bluetooth LE, tetherd writes each copy into it over the link it already keeps for notifications, and iOS wakes the app to show a notification with a Copy action (iOS lets only a foreground app write the pasteboard). Turn it on under Settings > Bluetooth Clipboard.
+With the app in the background, desktop copies still arrive: the app serves a clipboard characteristic over Bluetooth LE, tetherd writes each copy into it over the link it already keeps for notifications, and iOS wakes the app to show a notification with a Copy action (iOS lets only a foreground app write the pasteboard). Turn it on under Settings > Bluetooth Clipboard. The full design is in [docs/BLUETOOTH-CLIPBOARD.md](docs/BLUETOOTH-CLIPBOARD.md).
 
 ### File Transfer
 Drag and drop files from Linux directly into the iPhone app, or receive files automatically to your `$XDG_DOWNLOAD_DIR` (~/Downloads).
