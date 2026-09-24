@@ -156,8 +156,15 @@ cover the CoreDevice pasteboard service. Two options:
 2. Extend idevice's FFI with the pasteboard client and link it into tetherd.
    More integration surface in C++ for the same behaviour.
 
-Pairing records live beside Tether's other state (`$XDG_DATA_HOME/tether/`),
-mode 0600: the lockdown record and the RemotePairing record.
+Pairing records: the lockdown record and the RemotePairing record, mode 0600.
+Tether's existing app pairing (self-signed mTLS certificates, Bluetooth) is a
+separate system and is unaffected. When another tool on the same machine has
+already paired the phone this way, the helper should read that tool's records
+rather than pair again: no second Trust prompt, and no question of whether a
+second pairing from the same host replaces the first (iOS keeps a list of
+paired hosts, so a separate pairing is expected to coexist, but that is
+unverified). Otherwise it pairs itself and stores the records under
+`$XDG_DATA_HOME/tether/`.
 
 ## Security
 
