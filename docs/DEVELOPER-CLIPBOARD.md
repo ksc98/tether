@@ -124,7 +124,6 @@ tetherd owns a small state machine per phone:
 |---|---|
 | `unpaired` | the user runs the one-time USB pairing |
 | `searching` | mDNS finds the phone and pair-verify succeeds |
-| `locked-after-boot` | the phone has been unlocked once since boot (pair-verify stops failing) |
 | `tunnel-up` | RSD lists `com.apple.coredevice.pasteboardservice`, or the mount below succeeds |
 | `mounting` | the personalized mount succeeds (TSS reachable) |
 | `syncing` | the tunnel or a service connection drops |
@@ -135,9 +134,14 @@ tetherd owns a small state machine per phone:
 - **Reboot detection**: a reboot unmounts the image and resets the phone's
   uptime. The first successful connection after a drop checks
   `lookup_image`; if nothing is mounted it goes through `mounting` again.
-- **Before first unlock** iOS keeps its keys locked and refuses the pairing
-  connection. tetherd reports "phone restarted: unlock it once" and keeps
-  retrying quietly. This is the one step the user cannot skip.
+- **Before first unlock** the phone is not on Wi-Fi at all (iOS 27.2,
+  checked over a 90 s locked wait): its address answers neither ARP nor ping,
+  lockdown is not advertised, and only a cached `_remotepairing._tcp` record
+  may still resolve, so connecting to it fails. The host cannot tell a
+  restarted phone from one that is out of range, so tetherd stays in
+  `searching` and reports "phone unreachable: if it restarted, unlock it
+  once", retrying quietly. It connects on its own within seconds of the first
+  unlock. This is the one step the user cannot skip.
 - **No internet at boot**: stay in `mounting` with a clear status and retry;
   sync resumes when TSS answers.
 
