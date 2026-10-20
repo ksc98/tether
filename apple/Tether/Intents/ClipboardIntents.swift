@@ -30,7 +30,7 @@ struct SendToDesktopClipboardIntent: AppIntent {
     )
     static let openAppWhenRun = false
 
-    @Parameter(title: "Clipboard", supportedContentTypes: [.image, .text])
+    @Parameter(title: "Clipboard", supportedContentTypes: [.image, .text], inputConnectionBehavior: .connectToPreviousIntentResult)
     var clipboard: IntentFile
 
     static var parameterSummary: some ParameterSummary {
@@ -116,7 +116,7 @@ struct SyncClipboardIntent: AppIntent {
     )
     static let openAppWhenRun = false
 
-    @Parameter(title: "Clipboard", supportedContentTypes: [.image, .text])
+    @Parameter(title: "Clipboard", supportedContentTypes: [.image, .text], inputConnectionBehavior: .connectToPreviousIntentResult)
     var clipboard: IntentFile
 
     static var parameterSummary: some ParameterSummary {
