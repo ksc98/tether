@@ -52,7 +52,10 @@ namespace tether {
 
     // A clipboard PNG as file_start/file_chunk/file_end messages tagged with
     // "clipboard": kind ("updated" or "content"). Empty when the image is too large.
-    std::vector<std::string> clipboard_image_messages(const std::string& png, const std::string& kind);
+    // changed_at (desktop clock, ms) rides on file_start when nonzero, as it does on
+    // clipboard_content, so a phone can tell which side is newer.
+    std::vector<std::string>
+    clipboard_image_messages(const std::string& png, const std::string& kind, int64_t changed_at = 0);
 
     // Sends a clipboard PNG as "updated" to every session that announced
     // clipboard_image in its hello. Older clients would save it as a file.

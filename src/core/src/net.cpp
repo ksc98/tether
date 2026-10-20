@@ -970,7 +970,8 @@ namespace tether {
         return 0;
     }
 
-    std::vector<std::string> clipboard_image_messages(const std::string& png, const std::string& kind) {
+    std::vector<std::string>
+    clipboard_image_messages(const std::string& png, const std::string& kind, int64_t changed_at) {
         constexpr size_t CHUNK_BYTES = 512 * 1024;
         if (png.size() > CLIPBOARD_IMAGE_MAX_BYTES) {
             debug::log(WARN, "clipboard image of {} bytes exceeds the transfer cap; not sent", png.size());
@@ -985,6 +986,8 @@ namespace tether {
         nlohmann::json start{{"command", "file_start"}, {"filename", "clipboard.png"}, {"transfer_id", id}};
         start["size"] = png.size();
         start["clipboard"] = kind;
+        if (changed_at)
+            start["changed_at"] = changed_at;
         std::vector<std::string> out{start.dump()};
         for (size_t off = 0, idx = 0; off < png.size(); off += CHUNK_BYTES, ++idx) {
             const size_t len = std::min(CHUNK_BYTES, png.size() - off);
@@ -994,6 +997,18 @@ namespace tether {
         }
         out.push_back(nlohmann::json{{"command", "file_end"}, {"transfer_id", id}}.dump());
         return out;
+    }
+
+    // The answer to clipboard_get as text, newline-terminated. With an image
+    // selected the cached text predates it, so a client that is not sent the
+    // image gets nothing rather than the stale text. changed_at lets a phone
+    // tell which side is newer.
+    static std::string clipboard_content_reply() {
+        nlohmann::json resp;
+        resp["command"] = "clipboard_content";
+        resp["content"] = g_wayland->get_clipboard_image().empty() ? g_wayland->get_clipboard() : std::string{};
+        resp["changed_at"] = g_wayland->clipboard_changed_at();
+        return resp.dump() + "\n";
     }
 
     void broadcast_clipboard_image(const std::string& png, int exclude_fd) {
@@ -1610,16 +1625,7 @@ namespace tether {
                             bluetooth::g_clipboard_gatt->update(content);
                     } else if (j.contains("command") && j["command"] == "clipboard_get") {
                         if (g_wayland) {
-                            nlohmann::json resp;
-                            resp["command"] = "clipboard_content";
-                            // With an image selected the cached text predates it; a
-                            // client that cannot take the image gets nothing rather
-                            // than the stale text.
-                            resp["content"] =
-                                g_wayland->get_clipboard_image().empty() ? g_wayland->get_clipboard() : std::string{};
-                            resp["changed_at"] = g_wayland->clipboard_changed_at();
-                            std::string payload = resp.dump() + "\n";
-                            write_plain_packet(client_fd, payload);
+                            write_plain_packet(client_fd, clipboard_content_reply());
                             continue;
                         }
                     } else if (j.contains("command") && j["command"] == "clipboard_send") {
@@ -2369,7 +2375,8 @@ namespace tether {
                         if (g_wayland) {
                             std::vector<std::string> image;
                             if (session_accepts_clipboard_images(client_fd))
-                                image = clipboard_image_messages(g_wayland->get_clipboard_image(), "content");
+                                image = clipboard_image_messages(
+                                    g_wayland->get_clipboard_image(), "content", g_wayland->clipboard_changed_at());
                             if (!image.empty()) {
                                 for (auto& m : image) {
                                     m += "\n";
@@ -2377,14 +2384,7 @@ namespace tether {
                                 }
                                 continue;
                             }
-                            nlohmann::json resp;
-                            resp["command"] = "clipboard_content";
-                            // Same as the local handler: no stale text behind an image.
-                            resp["content"] =
-                                g_wayland->get_clipboard_image().empty() ? g_wayland->get_clipboard() : std::string{};
-                            // When it last changed, so a phone can tell which side is newer.
-                            resp["changed_at"] = g_wayland->clipboard_changed_at();
-                            std::string payload = resp.dump() + "\n";
+                            const std::string payload = clipboard_content_reply();
                             robust_ssl_write(ssl, payload.c_str(), payload.size());
                             continue;
                         }

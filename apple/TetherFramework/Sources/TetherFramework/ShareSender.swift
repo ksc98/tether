@@ -47,6 +47,24 @@ public enum ShareSenderError: LocalizedError {
 
 /// Guards a continuation that a reply, a connection failure and a timeout all
 /// race to resume, from different threads.
+/// When a connection last heard from the daemon.
+private final class IdleClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last = Date()
+
+    func touch() {
+        lock.lock()
+        defer { lock.unlock() }
+        last = Date()
+    }
+
+    func idle(for seconds: Double) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return Date().timeIntervalSince(last) >= seconds
+    }
+}
+
 private final class ResumeOnce: @unchecked Sendable {
     private let lock = NSLock()
     private var claimed = false
@@ -169,17 +187,20 @@ public actor ShareSender {
     /// The desktop clipboard as the daemon reports it.
     public struct DesktopClipboard: Sendable {
         public let text: String
+        // PNG when the desktop clipboard holds an image; text is then empty.
+        public let image: Data?
         // When it last changed on the desktop, ms since the epoch on the desktop's clock.
         // nil from a daemon that predates the field.
         public let changedAt: Int64?
 
-        public init(text: String, changedAt: Int64?) {
+        public init(text: String, image: Data? = nil, changedAt: Int64?) {
             self.text = text
+            self.image = image
             self.changedAt = changedAt
         }
     }
 
-    /// Fetch the desktop's current clipboard text from the paired tetherd daemon.
+    /// Fetch the desktop's current clipboard, text or image, from the paired tetherd daemon.
     ///
     /// Used by the Shortcuts intents, which run with the app in the background
     /// where no live connection exists.
@@ -192,15 +213,37 @@ public actor ShareSender {
             return .failure(error)
         }
 
+        // Announcing images makes the daemon answer clipboard_get with the
+        // image itself, as a file transfer tagged "content", when one is selected.
+        _ = await daemonSupportsClipboardImages(via: connection)
+
         let result: Result<DesktopClipboard, Error> = await withCheckedContinuation { continuation in
             let once = ResumeOnce()
+            let idle = IdleClock()
+            var image = Data()
+            var imageId: String?
+            var imageChangedAt: Int64?
 
             connection.onMessage = { message in
+                idle.touch()
                 switch message.parsedCommand {
                 case .clipboardContent:
                     if once.claim() {
                         continuation.resume(returning: .success(
                             DesktopClipboard(text: message.content ?? "", changedAt: message.changedAt)))
+                    }
+                case .fileStart where message.clipboard == "content":
+                    imageId = message.transferId
+                    imageChangedAt = message.changedAt
+                    image = Data()
+                case .fileChunk where message.transferId != nil && message.transferId == imageId:
+                    if let chunk = message.data.flatMap({ Data(base64Encoded: $0) }) {
+                        image.append(chunk)
+                    }
+                case .fileEnd where message.transferId != nil && message.transferId == imageId:
+                    if once.claim() {
+                        continuation.resume(returning: .success(
+                            DesktopClipboard(text: "", image: image, changedAt: imageChangedAt)))
                     }
                 case .error:
                     if once.claim() {
@@ -227,8 +270,11 @@ public actor ShareSender {
 
             connection.send(.clipboardGet())
 
+            // An image takes as long as it takes; only silence times out.
             Task {
-                try? await Task.sleep(for: .seconds(clipboardReplyTimeoutSeconds))
+                while !idle.idle(for: clipboardReplyTimeoutSeconds) {
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
                 if once.claim() {
                     continuation.resume(returning: .failure(ShareSenderError.timeout))
                 }

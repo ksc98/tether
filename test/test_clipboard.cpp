@@ -41,6 +41,14 @@ TEST(ClipboardImageTest, ChunksReassembleToTheOriginal) {
     EXPECT_EQ(joined, png);
 }
 
+TEST(ClipboardImageTest, StartCarriesChangedAtWhenGiven) {
+    const std::string png("\x89PNG\r\n\x1a\n", 8);
+    auto with = nlohmann::json::parse(tether::clipboard_image_messages(png, "content", 1792487730123).front());
+    EXPECT_EQ(with["changed_at"], 1792487730123);
+    auto without = nlohmann::json::parse(tether::clipboard_image_messages(png, "updated").front());
+    EXPECT_FALSE(without.contains("changed_at"));
+}
+
 TEST(ClipboardImageTest, EmptyOrOversizedSendsNothing) {
     EXPECT_TRUE(tether::clipboard_image_messages("", "updated").empty());
     EXPECT_TRUE(tether::clipboard_image_messages(std::string(33u * 1024 * 1024, 'x'), "updated").empty());
