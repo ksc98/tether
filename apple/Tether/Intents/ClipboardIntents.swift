@@ -158,7 +158,7 @@ enum ClipboardContent {
 
     init(_ file: IntentFile) {
         // UIImage refuses text, so anything it decodes is an image.
-        if file.type?.conforms(to: .text) != true, let png = UIImage(data: file.data)?.pngData() {
+        if file.type?.conforms(to: .text) != true, let png = Self.normalized(file.data) {
             self = .image(png)
         } else {
             self = .text(String(data: file.data, encoding: .utf8) ?? "")
@@ -166,11 +166,18 @@ enum ClipboardContent {
     }
 
     init(_ desktop: ShareSender.DesktopClipboard) {
-        if let png = desktop.image {
+        if let image = desktop.image, let png = Self.normalized(image) {
             self = .image(png)
         } else {
             self = .text(desktop.text)
         }
+    }
+
+    // Both sides' images go through the same encoder, so a pulled image that
+    // comes back through Get Clipboard has the same bytes, and the same key,
+    // rather than looking like a new copy on the phone.
+    private static func normalized(_ data: Data) -> Data? {
+        UIImage(data: data)?.pngData()
     }
 
     var isEmpty: Bool {
