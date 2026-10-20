@@ -68,7 +68,9 @@ install runs unsandboxed.
 The sideload build has no App Group and no Share Extension. xtool provisions
 App Groups only with Apple-ID login (the ASC API key path skips it silently),
 and a re-signed extension would land in a different keychain group from the
-app anyway. The App Intents run in the main app process and are unaffected.
+app anyway. The App Intents run in the main app process and are unaffected,
+so the fork sends images through them (Send to Desktop Clipboard, Sync
+Clipboard) instead of upstream's share-sheet "Copy to Clipboard".
 
 ### Type-checking on Linux before pushing
 

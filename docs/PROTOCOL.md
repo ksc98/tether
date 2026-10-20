@@ -107,9 +107,9 @@ Needs `clipboard_image` from both sides' [`hello`](#hello-both-directions-paired
 
 - `"set"` (Client -> Daemon): treated like `clipboard_set`. The daemon puts the PNG on the Wayland clipboard as `image/png` and relays it to other clients as `"updated"`. It is dropped unless every declared byte arrives and it starts with the PNG signature.
 - `"updated"` (Daemon -> Clients): the Host selection changed to one that offers `image/png` and no text type. Treated like `clipboard_updated`.
-- `"content"` (Daemon -> Client): the reply to `clipboard_get` when the selection is an image. Treated like `clipboard_content`.
+- `"content"` (Daemon -> Client): the reply to `clipboard_get` when the selection is an image. Treated like `clipboard_content`, and carries the same `changed_at`.
 
-Images over 32 MB are not sent or accepted. A client without `clipboard_image` gets no images. Its `clipboard_get` returns the last copied text.
+Images over 32 MB are not sent or accepted. A client without `clipboard_image` gets no images. Its `clipboard_get` returns empty `content` while an image is selected, rather than text copied before it.
 
 ---
 

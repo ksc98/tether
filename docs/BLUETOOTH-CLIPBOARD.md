@@ -159,8 +159,8 @@ background relaunch has somewhere to deliver to before any view exists.
   pasteboard when Automatic Clipboard Sync is on and records it in the
   clipboard history.
 - Always stores the copy (text, `seq`, whether complete) in `UserDefaults`
-  (`DesktopClipboardCache`), which is what the Sync Clipboard shortcut pulls
-  from without a Wi-Fi round trip.
+  (`DesktopClipboardCache`), which the Sync Clipboard shortcut falls back
+  to when the desktop is out of Wi-Fi reach.
 - App in the background and *Notify on Desktop Copies* on (off by default):
   posts a local notification, category
   `TETHER_DESKTOP_CLIPBOARD`, title `Copied on <desktop name>` (with
@@ -223,46 +223,65 @@ at 8 MiB and stores nothing.
 
 ## Related: Shortcuts actions
 
-Independent of Bluetooth, the fork adds two App Intents that run with the app
-in the background, for the other direction and for a pull:
+Independent of Bluetooth, the fork adds App Intents that run with the app in
+the background, over a one-shot mTLS connection:
 
-- **Send to Desktop Clipboard** (text parameter): `clipboard_set` over the
-  one-shot mTLS connection. Pair with *Get Clipboard* in a shortcut on the
-  Action Button or Back Tap for iPhone → desktop in one gesture.
+- **Send to Desktop Clipboard** (clipboard parameter, text or image): sets
+  the desktop clipboard, `clipboard_set` for text, a `"set"` PNG transfer for
+  an image. `Get Clipboard → Send to Desktop Clipboard` always pushes, even
+  when the desktop is newer.
 - **Get Desktop Clipboard** (returns text): `clipboard_get`. Pair with *Copy
   to Clipboard*.
 
 Neither touches `UIPasteboard` itself, since iOS denies it to a backgrounded
-app. The shortcut moves the text across that boundary.
+app. The shortcut moves the clipboard across that boundary.
+
+The clipboard parameter is an `IntentFile` (`[.image, .text]`), not a
+`String`: given a `String` parameter, Shortcuts converts an image to its name
+("Clipboard Oct 20, 2026 at 2.06 AM") before the app sees it. Text arrives as
+a `.txt` file; images are converted to PNG, the only type the daemon takes.
+The parameter connects to the previous action's output on its own. Changing a
+parameter's type unbinds it in shortcuts built before, which then open a file
+picker; delete the action and add it again.
 
 ### Sync Clipboard
 
-One action for both directions, meant for the Action Button:
-`Get Clipboard → Sync Clipboard → Copy to Clipboard`. iOS gives no time for
-the phone's clipboard, the desktop reports one for its own (`changed_at` in
-`clipboard_content`, milliseconds on the desktop's clock; the Bluetooth
-write's `seq` is the same clock), so the desktop is the side that can be
-known to be newer. The desktop clipboard comes from the Bluetooth cache when
-a complete copy is there, else from a Wi-Fi `clipboard_get`:
+One action for both directions, meant for the Action Button or Control
+Center: `Get Clipboard → Sync Clipboard → Copy to Clipboard`. iOS gives no
+time for the phone's clipboard, the desktop reports one for its own
+(`changed_at` on `clipboard_content` and on an image's `file_start`,
+milliseconds on the desktop's clock; the Bluetooth write's `seq` is the same
+clock), so the desktop is the side that can be known to be newer. The desktop
+clipboard comes from a Wi-Fi `clipboard_get` after a `hello` announcing
+`clipboard_image`, so an image selection comes back as the image. When the
+desktop is out of reach, a complete Bluetooth copy (text only) stands in.
+
+Content is compared by key: the text itself, or `image:<sha256>` for an image.
 
 1. The desktop clipboard changed since the last sync (its `changed_at` is
-   above the one remembered, and its text is not the last synced text) and
-   differs from the phone's: **pull**. The desktop text is returned.
-2. Otherwise the phone's text differs from the last synced text: **push**
-   (`clipboard_set`). The phone text is returned.
+   above the one remembered, and its key is not the last synced key) and
+   differs from the phone's: **pull**. The desktop text or image is returned.
+2. Otherwise the phone's key differs from the last synced key: **push**,
+   as Send to Desktop Clipboard does. The phone's clipboard is returned.
 3. Otherwise nothing changes.
 
 The very first sync has no history, so the desktop would always look
-changed; that press pushes the phone's text instead.
+changed; that press pushes the phone's clipboard instead.
 
-The result is always the text the phone should hold, so the shortcut ends
-with *Copy to Clipboard* unconditionally. The intent shows no dialog; the
-direction is written to the app's Bluetooth log. The shortcut is built by hand on the phone: iOS imports only
-`.shortcut` files signed by Apple's `shortcuts sign`, which runs on macOS
-only and needs an iCloud login, so neither Linux nor a CI runner can produce
-one, and no API lets an app install a shortcut. When both sides changed since the last sync the desktop wins,
-because its change is the one with a known time. State (last synced text,
-last desktop `changed_at`) lives in the app's `UserDefaults`.
+The result is always what the phone should hold, as a file (`.txt` typed
+`public.utf8-plain-text`, or `.png`), so the shortcut ends with *Copy to
+Clipboard* unconditionally. The intent shows no dialog; the direction is
+written to the app's Bluetooth log. The shortcut is built by hand on the
+phone: iOS imports only `.shortcut` files signed by Apple's `shortcuts sign`,
+which runs on macOS only and needs an iCloud login, so neither Linux nor a CI
+runner can produce one, and no API lets an app install a shortcut. When both
+sides changed since the last sync the desktop wins, because its change is the
+one with a known time. State (last synced key, last desktop `changed_at`)
+lives in the app's `UserDefaults`.
+
+Control Center gives a control no long-press menu of its own, so "push even
+though the desktop is newer" is a second control running the Send to Desktop
+Clipboard shortcut.
 
 ## Security
 
