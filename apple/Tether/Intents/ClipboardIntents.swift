@@ -4,11 +4,10 @@
 //
 //  Shortcuts actions for clipboard sync that run with the app in the background.
 //
-//  iOS gives a backgrounded app no access to UIPasteboard, so neither action
-//  touches it. The shortcut moves the text across that boundary instead:
+//  iOS gives a backgrounded app no access to UIPasteboard, so no action
+//  touches it. The shortcut moves the clipboard across that boundary instead:
 //
-//    Phone → desktop:  Get Clipboard  →  Send to Desktop Clipboard
-//    Image → desktop:  Get Clipboard  →  Send Image to Desktop Clipboard
+//    Phone → desktop:  Get Clipboard  →  Send to Desktop Clipboard (text or image)
 //    Desktop → phone:  Get Desktop Clipboard  →  Copy to Clipboard
 //    Either way:       Get Clipboard  →  Sync Clipboard  →  Copy to Clipboard
 //                      (text or image)
@@ -20,61 +19,60 @@ import TetherFramework
 import UIKit
 import UniformTypeIdentifiers
 
+// The clipboard comes in as a file: a String parameter would get an image's
+// name from Shortcuts, never its pixels. Text arrives as a .txt file, an image
+// in whatever format it was copied as; the daemon only takes PNG.
 struct SendToDesktopClipboardIntent: AppIntent {
     static let title: LocalizedStringResource = "Send to Desktop Clipboard"
     static let description = IntentDescription(
-        "Sets the clipboard of your paired Linux desktop to the given text, without opening Tether.",
+        "Sets the clipboard of your paired Linux desktop to the given text or image, without opening Tether.",
         categoryName: "Clipboard"
     )
     static let openAppWhenRun = false
 
-    @Parameter(title: "Text", inputOptions: String.IntentInputOptions(multiline: true))
-    var text: String
+    @Parameter(title: "Clipboard", supportedContentTypes: [.image, .text])
+    var clipboard: IntentFile
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Send \(\.$text) to the desktop clipboard")
+        Summary("Send \(\.$clipboard) to the desktop clipboard")
     }
 
     func perform() async throws -> some IntentResult {
-        guard !text.isEmpty else { throw ClipboardIntentError.emptyText }
-
-        switch await ShareSender.send(.clipboard(text)) {
-        case .success:
-            return .result()
-        case .failure(let error):
-            throw ClipboardIntentError.failed(error.localizedDescription)
+        let service = await DesktopClipboardService.shared
+        switch ClipboardContent(clipboard) {
+        case .image(let png):
+            switch await ShareSender.send(.clipboardImage(png)) {
+            case .success:
+                await ClipboardHistoryStore.shared.addImage(png, source: .local(service.phoneName()))
+                await service.monitor.noteExternal("sent image, \(png.count) bytes")
+                return .result()
+            case .failure(let error):
+                throw ClipboardIntentError.failed(error.localizedDescription)
+            }
+        case .text(let text):
+            guard !text.isEmpty else { throw ClipboardIntentError.emptyText }
+            switch await ShareSender.send(.clipboard(text)) {
+            case .success:
+                await ClipboardHistoryStore.shared.addText(text, source: .local(service.phoneName()))
+                return .result()
+            case .failure(let error):
+                throw ClipboardIntentError.failed(error.localizedDescription)
+            }
         }
     }
 }
 
-// Get Clipboard hands an image over as a file in whatever format it was
-// copied as; the daemon only takes PNG, so it is converted here.
-struct SendImageToDesktopClipboardIntent: AppIntent {
-    static let title: LocalizedStringResource = "Send Image to Desktop Clipboard"
-    static let description = IntentDescription(
-        "Sets the clipboard of your paired Linux desktop to the given image, without opening Tether.",
-        categoryName: "Clipboard"
-    )
-    static let openAppWhenRun = false
+// What a shortcut handed over as the phone's clipboard.
+enum ClipboardContent {
+    case text(String)
+    case image(Data) // PNG
 
-    @Parameter(title: "Image", supportedContentTypes: [.image])
-    var image: IntentFile
-
-    static var parameterSummary: some ParameterSummary {
-        Summary("Send \(\.$image) to the desktop clipboard")
-    }
-
-    func perform() async throws -> some IntentResult {
-        guard let png = UIImage(data: image.data)?.pngData() else { throw ClipboardIntentError.notAnImage }
-
-        switch await ShareSender.send(.clipboardImage(png)) {
-        case .success:
-            let service = await DesktopClipboardService.shared
-            await ClipboardHistoryStore.shared.addImage(png, source: .local(service.phoneName()))
-            await service.monitor.noteExternal("sent image, \(png.count) bytes")
-            return .result()
-        case .failure(let error):
-            throw ClipboardIntentError.failed(error.localizedDescription)
+    init(_ file: IntentFile) {
+        // UIImage refuses text, so anything it decodes is an image.
+        if file.type?.conforms(to: .text) != true, let png = UIImage(data: file.data)?.pngData() {
+            self = .image(png)
+        } else {
+            self = .text(String(data: file.data, encoding: .utf8) ?? "")
         }
     }
 }
@@ -107,8 +105,7 @@ struct GetDesktopClipboardIntent: AppIntent {
 //      push it.
 //   3. Otherwise there is nothing to do.
 //
-// The clipboard comes in as a file: a String parameter would get an image's
-// name from Shortcuts, never its pixels. Text arrives as a .txt file.
+// The clipboard comes in as a file, as for Send to Desktop Clipboard.
 // The result is always what the phone's clipboard should hold, so the
 // shortcut can end with Copy to Clipboard unconditionally.
 struct SyncClipboardIntent: AppIntent {
@@ -135,9 +132,12 @@ struct SyncClipboardIntent: AppIntent {
         let lastDesktopChangedAt = Int64(defaults.integer(forKey: Self.lastDesktopChangedAtKey))
         let lastText = defaults.string(forKey: Self.lastTextKey) ?? ""
 
-        // UIImage refuses text, so anything it decodes is the image case.
-        let png = (clipboard.type?.conforms(to: .text) == true) ? nil : UIImage(data: clipboard.data)?.pngData()
-        let text = png == nil ? (String(data: clipboard.data, encoding: .utf8) ?? "") : ""
+        var png: Data?
+        var text = ""
+        switch ClipboardContent(clipboard) {
+        case .image(let data): png = data
+        case .text(let string): text = string
+        }
         let phoneKey = png.map { "image:" + SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() } ?? text
 
         // A copy that arrived over Bluetooth is the desktop clipboard as of its
@@ -225,15 +225,12 @@ struct SyncClipboardIntent: AppIntent {
 
 enum ClipboardIntentError: Error, CustomLocalizedStringResourceConvertible {
     case emptyText
-    case notAnImage
     case failed(String)
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .emptyText:
             return "There is no text to send."
-        case .notAnImage:
-            return "The clipboard does not hold an image."
         case .failed(let message):
             return "\(message)"
         }
