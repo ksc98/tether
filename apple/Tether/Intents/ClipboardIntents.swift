@@ -8,12 +8,15 @@
 //  touches it. The shortcut moves the text across that boundary instead:
 //
 //    Phone → desktop:  Get Clipboard  →  Send to Desktop Clipboard
+//    Image → desktop:  Get Clipboard  →  Send Image to Desktop Clipboard
 //    Desktop → phone:  Get Desktop Clipboard  →  Copy to Clipboard
 //    Either way:       Get Clipboard  →  Sync Clipboard  →  Copy to Clipboard
 //
 
 import AppIntents
 import TetherFramework
+import UIKit
+import UniformTypeIdentifiers
 
 struct SendToDesktopClipboardIntent: AppIntent {
     static let title: LocalizedStringResource = "Send to Desktop Clipboard"
@@ -35,6 +38,38 @@ struct SendToDesktopClipboardIntent: AppIntent {
 
         switch await ShareSender.send(.clipboard(text)) {
         case .success:
+            return .result()
+        case .failure(let error):
+            throw ClipboardIntentError.failed(error.localizedDescription)
+        }
+    }
+}
+
+// Get Clipboard hands an image over as a file in whatever format it was
+// copied as; the daemon only takes PNG, so it is converted here.
+struct SendImageToDesktopClipboardIntent: AppIntent {
+    static let title: LocalizedStringResource = "Send Image to Desktop Clipboard"
+    static let description = IntentDescription(
+        "Sets the clipboard of your paired Linux desktop to the given image, without opening Tether.",
+        categoryName: "Clipboard"
+    )
+    static let openAppWhenRun = false
+
+    @Parameter(title: "Image", supportedContentTypes: [.image])
+    var image: IntentFile
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Send \(\.$image) to the desktop clipboard")
+    }
+
+    func perform() async throws -> some IntentResult {
+        guard let png = UIImage(data: image.data)?.pngData() else { throw ClipboardIntentError.notAnImage }
+
+        switch await ShareSender.send(.clipboardImage(png)) {
+        case .success:
+            let service = await DesktopClipboardService.shared
+            await ClipboardHistoryStore.shared.addImage(png, source: .local(service.phoneName()))
+            await service.monitor.noteExternal("sent image, \(png.count) bytes")
             return .result()
         case .failure(let error):
             throw ClipboardIntentError.failed(error.localizedDescription)
@@ -157,12 +192,15 @@ struct SyncClipboardIntent: AppIntent {
 
 enum ClipboardIntentError: Error, CustomLocalizedStringResourceConvertible {
     case emptyText
+    case notAnImage
     case failed(String)
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .emptyText:
             return "There is no text to send."
+        case .notAnImage:
+            return "The clipboard does not hold an image."
         case .failed(let message):
             return "\(message)"
         }
