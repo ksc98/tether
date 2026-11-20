@@ -51,6 +51,8 @@ just ios-build          # build on home@m4m-1 (Xcode 27) over ssh, install over 
 just ios-install        # fallback: newest successful CI IPA → xtool install --usb
 ```
 
+**Xcode is not installed on m4m-1 right now** (removed in the 2026-11-19 host cleanup). Reinstall it with the `xcodes` command below before using `ios-build`; until then `ios-install` (the CI IPA) is the path.
+
 `ios-build` is the normal path: it rsyncs `apple/` to the mini, runs the
 same `xcodebuild` as the workflow, and installs the result. It builds the
 working tree as it is, so uncommitted changes can be tried on the phone
